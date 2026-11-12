@@ -16,7 +16,7 @@ import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
 import { allowedSender, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
-import { bindDingTalkReply, pendingCardReplies, remindCardReply, replyToCard } from '../sources/dingtalk-cards.ts'
+import { acknowledgeCard, bindDingTalkReply, pendingCardReplies, remindCardReply, replyToCard } from '../sources/dingtalk-cards.ts'
 import { Commands } from '../infra/commands.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import { environmentOf, ticketEnvironment, type Variable } from './execution-environment.ts'
@@ -126,7 +126,7 @@ export class Runtime extends Service implements SourceHost {
         closing: () => this.closing(), environment,
         cardReplyInstructions: ticket => {
           const pending = pendingCardReplies(runtime.context({ kind: 'dingtalk', health: [] }), ticket?.id)
-          return pending.length ? `\n## Bound cards requiring an explicit final reply\n${JSON.stringify(pending)}\nA bound card must never be left silent when its processing round ends. Use the normal result/answer/attention reply when authorized, or orchestrator_card_reply for a factual no-action, ignored, duplicate, cancelled or failed outcome. An internal report or assistant text does not update a card. Main agent: do not finish a worker's card while it is still executing; complete it after the worker's handoff. Do not send the same outcome through both reply paths.` : ''
+          return pending.length ? `\n## Bound cards requiring initial confirmation and final reply\n${JSON.stringify(pending)}\nEvery bound card requires an initial agent confirmation before processing and an explicit final reply when its round ends, for both human requests and system events. If initial_confirmation_required is true, use orchestrator_card_reply action=acknowledge; the automatic receipt does not count. Use the normal result/answer/attention reply when authorized, or orchestrator_card_reply action=reply for a factual terminal no-action, ignored, duplicate, cancelled or failed outcome. An internal report or assistant text does not update a card. Main agent: do not finish a worker's card while it is still executing; complete it after the worker's handoff. Do not duplicate an existing confirmation or final reply.` : ''
         },
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }
@@ -178,7 +178,7 @@ export class Runtime extends Service implements SourceHost {
           store.atomic(() => {
             if (!remindCardReply(context, card.card_id)) return
             sessions.relay(`card-reply-required:${card.card_id}`, JSON.stringify({ kind: 'card_reply_required', ...card,
-              note: 'This card still requires an explicit final reply. Check the disposition or worker handoff, then reply on this exact card. Ignored, duplicate and no-action outcomes must be stated explicitly. Do not invent completion or send a duplicate ticket result.' }))
+              note: 'This card requires an initial agent confirmation and an explicit final reply. If initial_confirmation_required is true, send action=acknowledge first. Check the disposition or worker handoff, then reply on this exact card. Ignored, duplicate and no-action outcomes must be stated explicitly. Do not invent completion or send a duplicate ticket result.' }))
           })
         }
       }
@@ -218,6 +218,11 @@ export class Runtime extends Service implements SourceHost {
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
         cardReplies: {
           pending: ticketId => pendingCardReplies(runtime.context({ kind: 'dingtalk', health: [] }), ticketId),
+          acknowledge: (id, text, ticketId) => {
+            const reply = acknowledgeCard(runtime.context({ kind: 'dingtalk', health: [] }), id, text, ticketId)
+            passes.request()
+            return reply
+          },
           reply: (id, text, ticketId) => {
             const reply = replyToCard(runtime.context({ kind: 'dingtalk', health: [] }), id, text, ticketId)
             passes.request()

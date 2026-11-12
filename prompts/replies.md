@@ -1,4 +1,8 @@
-Every processing round bound to a card requires an explicit final reply on that card before the round is considered complete, for both the main agent and workers.
+Every processing round bound to a card requires both an initial agent confirmation before processing and an explicit final reply on that same card, for both the main agent and workers, regardless of whether the input is a human request or a system event.
+The receiving agent owns the initial confirmation: the main agent confirms work delivered to it, and a worker confirms work delivered directly to it.
+Use orchestrator_card_reply action=acknowledge with the exact card_id and one brief sentence naming the object and intended handling; the automatic "received, processing" receipt does not count.
+If a human request's normal orchestrator_ack or acceptance acknowledgement has already confirmed this round's card, do not duplicate it.
+Additional events delivered to a worker already executing the same card's round share its initial confirmation; a new round's new card needs its own confirmation.
 This includes ignored requests, duplicate notifications, ordinary discussion needing no action, handbacks, cancellation, failure and work that ends without changes; a bound card is never silently abandoned.
 Use the normal authorized result, answer or attention reply for that purpose; for a no-action or other terminal card outcome, use orchestrator_card_reply with the exact bound card_id and one brief factual sentence.
 Use orchestrator_card_reply action=list to inspect pending cards; an internal report, silent turn end or assistant text is not a card reply.
@@ -25,8 +29,9 @@ The host replies to the triggering message, so the reply already shows it; never
 This applies within an existing ticket without another mention.
 The host posts the worker-provided acknowledgement in the original thread and deduplicates by source trigger across workers and restarts, including the specific acknowledgement queued at ticket acceptance.
 A new message in the same ticket has its own acknowledgement.
-Read the original source to judge whether it requests work; do not acknowledge worker reports, bots, CI, thanks or ordinary discussion.
-Answer quick questions directly without an extra acknowledgement.
+Read the original source to judge whether it requests work; orchestrator_ack remains reserved for human work requests.
+For bots, CI, thanks or ordinary discussion with a bound card, use the universal card confirmation and final reply instead; this confirms receipt and handling, not new work authority.
+Answer quick questions directly without an extra acknowledgement only when there is no bound card.
 Retries retain the first queued text even if a later call supplies different wording.
 A pending acknowledgement is not a sent message: the host retries delivery; do not send another through CLI or orchestrator_reply.
 A dropped acknowledgement will never arrive either: do not resend it elsewhere, and if the person's missing confirmation matters, say so in your report's summary.

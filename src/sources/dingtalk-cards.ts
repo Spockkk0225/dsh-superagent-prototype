@@ -9,6 +9,7 @@ interface Card {
   closed?: boolean
   informational?: boolean
   replyReminded?: boolean
+  acknowledgementId?: string
   messages?: { id: string; text: string; flowStatus: '2' | '3' }[]
 }
 const cards = family<Card, [string]>('dingtalk-card:')
@@ -20,6 +21,7 @@ export const receiptId = (triggerId: string) => key('dingtalk-received', trigger
 const activeKey = (conversation: string, ticket: string) => activeCards(key(conversation, ticket))
 const triggerKey = (conversation: string, trigger: string, ticket = '') => triggerCards(key(conversation, trigger, ticket))
 const closed = (card: Card) => card.closed ?? card.messages?.at(-1)?.flowStatus === '3'
+const acknowledged = (card: Card) => !!card.acknowledgementId || !!card.messages?.some(message => message.flowStatus === '2')
 
 /** Explicit replies are required for current bound rounds, including no-op and ignored requests. */
 export function pendingCardReplies(context: SourceContext, ticketId?: string) {
@@ -32,7 +34,8 @@ export function pendingCardReplies(context: SourceContext, ticketId?: string) {
       || !!card.ticketId && context.state.get(taskCards(card.ticketId)) === id
     if (!bound) return []
     return [{ card_id: id, trigger_id: card.triggerId, ticket_id: card.ticketId,
-      conversation_id: card.conversationId, reply_reminded: card.replyReminded ?? false }]
+      conversation_id: card.conversationId, initial_confirmation_required: !acknowledged(card),
+      reply_reminded: card.replyReminded ?? false }]
   })
 }
 
@@ -41,6 +44,27 @@ export function remindCardReply(context: SourceContext, id: string): boolean {
   if (!card || closed(card) || card.replyReminded) return false
   context.state.set(cards(id), { ...card, replyReminded: true })
   return true
+}
+
+/** Initial agent confirmation for any bound card, including system events and cards owned by the main agent. */
+export function acknowledgeCard(context: SourceContext, id: string, text: string, ticketId?: string): string {
+  return context.atomic(() => {
+    const card = context.state.get(cards(id))
+    if (!card || ticketId && card.ticketId !== ticketId) throw new Error('Card is not bound to this session')
+    if (card.acknowledgementId) return card.acknowledgementId
+    const previous = card.messages?.find(message => message.flowStatus === '2')
+    if (previous) return previous.id
+    if (!pendingCardReplies(context, ticketId).some(pending => pending.card_id === id)) {
+      throw new Error('Card has no open delivery binding')
+    }
+    const replyId = key('dingtalk-card-ack', id)
+    context.state.set(cards(id), { ...card, acknowledgementId: replyId })
+    context.notify({ id: replyId, kind: 'acknowledgement', ...card.ticketId ? { ticketId: card.ticketId } : {}, text,
+      channel: { source: 'dingtalk', thread: `dingtalk:${card.conversationId}`, address: {
+        conversationId: card.conversationId, triggerId: card.triggerId, cardId: id,
+      } } })
+    return replyId
+  })
 }
 
 /** Called only by an agent's explicit reply tool, never synthesizes a successful result. */
@@ -52,6 +76,7 @@ export function replyToCard(context: SourceContext, id: string, text: string, ti
     if (!pendingCardReplies(context, ticketId).some(pending => pending.card_id === id)) {
       throw new Error('Card has no current delivery binding')
     }
+    if (!acknowledged(card)) throw new Error('Send the initial card confirmation with action=acknowledge before the final reply')
     const replyId = key('dingtalk-card-final', id)
     context.state.set(cards(id), { ...card, closed: true })
     context.notify({ id: replyId, kind: 'reply', ...card.ticketId ? { ticketId: card.ticketId } : {}, text,
@@ -90,7 +115,11 @@ export function bindDingTalkReply(context: SourceContext, message: OutboundMessa
     context.state.set(taskCards(message.ticketId), id)
     context.state.set(triggerKey(conversation, trigger, message.ticketId), id)
   }
-  if (message.kind === 'reply') card.closed = true
+  if (message.kind === 'acknowledgement' && !acknowledged(card)) card.acknowledgementId = message.id
+  if (message.kind === 'reply') {
+    if (!acknowledged(card)) throw new Error('Send the initial card confirmation with action=acknowledge before the final reply')
+    card.closed = true
+  }
   context.state.set(cards(id), card)
   return { ...message, channel: { ...message.channel, thread: `dingtalk:${card.conversationId}`,
     address: { ...message.channel.address, conversationId: card.conversationId, triggerId: card.triggerId, cardId: id } } }
@@ -152,7 +181,7 @@ export class DingTalkCards {
       card.used = true
       card.messages ??= []
       if (!card.messages.some(item => item.id === message.id)) card.messages.push({ id: message.id, text: message.text,
-        flowStatus: message.kind === 'acknowledgement' && !!message.ticketId ? '2' : '3' })
+        flowStatus: message.kind === 'acknowledgement' ? '2' : '3' })
     }
     this.context.state.set(cards(id), card)
     const taskLabel = card.ticketId ? `#${card.ticketId.slice(0, 12)}` : ''
