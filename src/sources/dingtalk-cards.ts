@@ -15,6 +15,7 @@ interface Card {
   deliveryId?: string
   githubMentions?: string[]
   githubMirrorSuppressed?: boolean
+  githubMessages?: { id: string; text: string }[]
   messages?: { id: string; text: string; flowStatus: '2' | '3' }[]
 }
 const cards = family<Card, [string]>('dingtalk-card:')
@@ -75,10 +76,25 @@ export function githubMentionReplies(context: SourceContext, message: OutboundMe
     targets.set(key(String(number), root), trigger)
   }
   const prefix = 'This is by an automated agent, not a human.'
+  let text = message.text.startsWith(prefix) ? message.text : `${prefix}\n\n${message.text}`
+  let revision: number | undefined
+  if (card && targets.size) {
+    // Save cumulative snapshots at enqueue time, rather than depending on which destination is delivered first.
+    const parts = card.githubMessages ?? []
+    if (!parts.some(part => part.id === message.id)) parts.push({ id: message.id,
+      text: message.text.startsWith(prefix) ? message.text.slice(prefix.length).trimStart() : message.text })
+    card.githubMessages = parts
+    context.state.set(cards(cardId!), card)
+    revision = parts.length
+    text = `${prefix}\n\n${parts.map(part => part.text).join('\n\n---\n\n')}`
+  }
   return [...targets].map(([target, trigger]) => ({ ...message,
     id: key('github-mention-reply', message.id, target),
-    channel: githubChannel(Number(trigger.meta.number), trigger.url),
-    text: message.text.startsWith(prefix) ? message.text : `${prefix}\n\n${message.text}`,
+    channel: { ...githubChannel(Number(trigger.meta.number), trigger.url), address: {
+      ...githubChannel(Number(trigger.meta.number), trigger.url).address,
+      ...revision !== undefined ? { commentKey: key('github-card-comment', cardId!, target), revision: String(revision) } : {},
+    } },
+    text,
   }))
 }
 
@@ -305,7 +321,9 @@ export class DingTalkCards {
     if (!response.ok) throw new Error(`DingTalk card delivery failed (HTTP ${response.status}); check template and card permissions`)
     const result = await response.json() as { code?: string }
     if (result.code) throw new Error('DingTalk card delivery was rejected; check template and card permissions')
-    card.sent = true; this.context.state.set(cards(id), card)
+    // Intake/reply enqueue may have advanced this round while the HTTP request was in flight.
+    // Preserve its newer bindings, completion state and cumulative GitHub snapshot.
+    this.context.state.set(cards(id), { ...this.context.state.get(cards(id)) ?? card, sent: true })
   }
 
 }

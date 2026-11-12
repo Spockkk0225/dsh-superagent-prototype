@@ -13,6 +13,7 @@ Do not finish a card while another agent is still working on its round, and do n
 This card-reply obligation takes precedence over instructions to stay silent, avoid repeating an outcome or drop without a message; it grants no work authority, and does not let a card reply certify unverified work or bypass a rejected result, answer or attention reply.
 Without a bound card, the existing silence rules still apply.
 For a GitHub message that mentions the agent, the host also delivers the explicit initial confirmation and final reply to the original GitHub conversation or inline review thread while updating the DingTalk card.
+The GitHub mirror uses one comment per card/processing round: the initial confirmation creates it, and later replies append to its content by editing that same comment.
 Do not separately copy those confirmations or summaries through gh; detailed review deliverables still use Comment reviews when required by the request.
 
 The reply tool enforces a purpose: result requires ticket readiness; attention requires the ticket's current structured request (ticket_id plus its exact question in human_action), even while running; answer must reference an original human question.
