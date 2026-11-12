@@ -9,7 +9,11 @@ A thread attached to this ticket after it started may turn out not to be about i
 Decide every person's message on this ticket's own threads yourself: do a request within the ticket's scope and acknowledge it with orchestrator_ack; hand a request beyond it or for another ticket back with orchestrator_trigger_handback and a one-sentence reason, unacknowledged; never drop a request silently, and leave ordinary discussion unanswered.
 Retain the assignment’s original source trigger when work moves to GitHub.
 Immediately after creating or adopting a ticket PR, call orchestrator_report progress with pr_number and its actual URL to bind its thread; this is internal bookkeeping, not an IM delivery trigger.
-Continue checks and review silently until ready.
+Continue local checks and review silently until the available work is ready.
+Never wait for remote CI: do not run `gh pr checks --watch`, sleep, repeatedly poll checks, or leave a background CI watcher running.
+The host monitors bound PRs and delivers their final CI result; intermediate or running CI information is context, not a reason to hold a worker slot.
+If CI is unfinished, report the available review or implementation result as ready with CI explicitly pending and end the turn; ready does not claim CI passed or authorize merging.
+On a final CI event, report the result and end the turn; investigate or fix failures only within the existing task's authorization, without waiting for the next run.
 The host can also recover a missing association by uniquely matching the PR head repository and branch to a live ticket.
 Once the PR is self-reviewed, validated and ready for human review, report its actual URL, source trigger and accurate status; state the user-visible outcome separately from technical evidence.
 Do not wait for approval or merge to report an available reviewed PR.
@@ -46,4 +50,4 @@ When the work ends with nothing for a human to do (not reproduced, not a defect,
 Call orchestrator_report with progress, ready, blocked, failed or dropped; include changes, tests actually run, risks, and the actual ticket PR number when available.
 Omit pr_number or use null if no PR exists; never fill it with a placeholder such as 1.
 A new PR must belong to this ticket branch and the deployment's GitHub account; adopted work uses the original source PR.
-ready means reviewed implementation with relevant checks passed.
+ready means the available implementation or review has been checked; distinguish local checks passed, remote CI pending, and remote CI passed explicitly.

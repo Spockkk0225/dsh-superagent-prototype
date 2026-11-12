@@ -286,8 +286,9 @@ async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
   const known = previous?.branch === branch ? previous.failures : undefined
   const failures = ciFailures(snapshot)
   const counts = ciCounts(snapshot)
-  // Retain previous failures while checks are still running so recovery is reported only once all checks pass.
-  const now = failures.length || !counts.running ? failures : known ?? []
+  // CI is observed by the service, never by a waiting worker. Ignore partial results.
+  if (counts.running || !snapshot.checks.length && !snapshot.statuses.length) return
+  const now = failures
   let revision = previous?.revision ?? 0
   if (known ? JSON.stringify(now) !== JSON.stringify(known) : app && counts.failed > 0) {
     revision += 1
@@ -440,16 +441,29 @@ export async function pollTicketPulls(ctx: SourceContext, signal?: AbortSignal, 
     } catch (error) { if (!stopped(ctx, round)) failed(ctx, round, number, error) }
   }
 }
-/** Polls a PR's CI checks; only changes after the first baseline observation become Triggers. */
+/** Emit a bound PR's final CI result after two matching completed observations; partial states never wake a worker. */
 async function pollChecks(ctx: SourceContext, round: Round, number: number, pr: Pull): Promise<void> {
   const snapshot = await pullChecks(ctx.commands.withSignal(round.signal), pr.head.sha, round.tally)
   const fingerprint = key(JSON.stringify(snapshot))
   const previous = ctx.state.get(KV.github.ci(number))
-  if (previous?.fingerprint === fingerprint) return
-  const revision = previous ? previous.revision + 1 : 0
-  if (previous) await ctx.receive(ciTrigger(pr, revision, ciSummary(snapshot, `PR #${number}`, `github/pulls/${number}/checks`)))
-  ctx.state.set(KV.github.ci(number), { fingerprint, revision })
-  ctx.threads.describe(`github:${number}`, { facts: { ci: ciFact(ciCounts(snapshot)) } })
+  const counts = ciCounts(snapshot)
+  const complete = snapshot.checks.length + snapshot.statuses.length > 0 && !counts.running
+    && snapshot.checks.every(check => check.conclusion !== null)
+  let revision = previous?.revision ?? 0
+  if (!complete) {
+    // Seeing a new execution in progress permits another final report, even for a rerun of the same SHA.
+    ctx.state.set(KV.github.ci(number), { fingerprint, revision })
+    return
+  }
+  const stable = previous?.settled === fingerprint
+  let reported = previous?.reported
+  if (stable && reported !== fingerprint) {
+    revision += 1
+    await ctx.receive(ciTrigger(pr, revision, ciSummary(snapshot, `PR #${number}`, `github/pulls/${number}/checks`)))
+    reported = fingerprint
+  }
+  ctx.state.set(KV.github.ci(number), { fingerprint, revision, settled: fingerprint, reported })
+  ctx.threads.describe(`github:${number}`, { facts: { ci: ciFact(counts) } })
 }
 function nameThread(ctx: SourceContext, number: number, title: string): void {
   ctx.threads.patch(`github:${number}`, { title })

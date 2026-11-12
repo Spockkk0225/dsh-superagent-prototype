@@ -12,6 +12,8 @@ export interface OutboxHost {
   readonly sources: Pick<SourceRegistry, 'instance' | 'channelAllowed' | 'send'>
   readonly commands: Commands
   paused(): boolean
+  /** Fix transport correlations before delivery can race with another incoming event. */
+  prepare?(message: OutboundMessage): OutboundMessage
 }
 
 /**
@@ -28,7 +30,11 @@ export class Outbox implements OutboxPort {
     // Validate IM reply length here; acknowledgements are already validated when decided.
     if (message.kind === 'reply' && message.channel.source === 'feishu') checkedImText(message.text)
     const { store, effects } = this.host
-    store.atomic(() => { if (store.receipts.add(message)) effects.enqueue('reply', message.id, {}) })
+    store.atomic(() => {
+      if (store.receipts.get(message.id)) return
+      const prepared = this.host.prepare?.(message) ?? message
+      if (store.receipts.add(prepared)) effects.enqueue('reply', message.id, {})
+    })
   }
   status(id: string): ReplyStatus | undefined { return this.host.store.receipts.get(id)?.status }
   withdraw(id: string): void {

@@ -62,7 +62,10 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
       bindThread: (id, thread, own) => { deps.engine.bindThread(id, thread, own) },
       threadClosed: (thread, outcome, at) => { deps.engine.threadClosed(thread, outcome, at) },
     },
-    triggers: { get: id => store.triggers.get(id), latest: thread => store.read.threadTriggers(thread, 1)[0] },
+    triggers: { get: id => store.triggers.get(id), targets: id => {
+      const disposition = store.triggers.disposition(id)
+      return (disposition?.fanout ?? []).filter(ticket => !disposition?.context?.includes(ticket))
+    }, latest: thread => store.read.threadTriggers(thread, 1)[0] },
     notify: message => { deps.outbox.send(message) },
     report: (entry, value) => {
       if (!kind.health.includes(entry)) throw new Error(`The ${kind.kind} Source has no health entry ${entry}`)

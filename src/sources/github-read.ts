@@ -5,9 +5,10 @@ import { validItems, type Commands, type Tally } from '../infra/commands.ts'
 import { CommentSchema, IssueSchema, isHumanLogin, reviewPlace, type GithubComment } from './github-trigger.ts'
 import type { ContextMessage, ThreadContext } from './kind.ts'
 
-const CheckSchema = z.looseObject({ name: z.string(), status: z.string(), conclusion: z.string().nullable() })
+const CheckSchema = z.looseObject({ name: z.string(), status: z.string(), conclusion: z.string().nullable(),
+  id: z.number().optional(), started_at: z.string().nullish(), completed_at: z.string().nullish() })
 const StatusSchema = z.looseObject({ context: z.string(), state: z.string() })
-type Check = Pick<z.infer<typeof CheckSchema>, 'name' | 'status' | 'conclusion'>
+type Check = Pick<z.infer<typeof CheckSchema>, 'name' | 'status' | 'conclusion' | 'id' | 'started_at' | 'completed_at'>
 type Status = Pick<z.infer<typeof StatusSchema>, 'context' | 'state'>
 
 export interface CiSnapshot { head: string; checks: Check[]; statuses: Status[] }
@@ -64,7 +65,9 @@ export async function pullChecks(commands: Commands, head: string, tally?: Tally
   const statuses = await commands.pages(StatusSchema, `commits/${head}/statuses?per_page=100`, tally)
   const latest = new Map<string, string>()
   for (const status of statuses) if (!latest.has(status.context)) latest.set(status.context, status.state)
-  const checks = runs.map(({ name, status, conclusion }) => ({ name, status, conclusion }))
+  const checks = runs.map(({ name, status, conclusion, id, started_at, completed_at }) => ({ name, status, conclusion,
+    ...id !== undefined ? { id } : {}, ...started_at !== undefined ? { started_at } : {},
+    ...completed_at !== undefined ? { completed_at } : {} }))
   return { head, checks: checks.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
     statuses: [...latest].map(([context, state]) => ({ context, state })).sort((a, b) => a.context.localeCompare(b.context)) }
 }
