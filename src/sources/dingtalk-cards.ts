@@ -32,7 +32,7 @@ export class DingTalkCards {
     const triggerId = message.channel.address.triggerId
       ?? (message.ticketId ? this.context.tickets.get(message.ticketId)?.origin.triggerId : undefined)
     const origin = triggerId ? this.context.triggers.get(triggerId) : undefined
-    if (!origin || origin.source !== 'dingtalk' || origin.meta.conversationId !== conversationId) {
+    if (!origin || origin.channel?.source !== 'dingtalk' || origin.channel.address.conversationId !== conversationId) {
       throw new Error('DingTalk card has no matching source message')
     }
     const receipt = receiptId(origin.id)
@@ -60,11 +60,13 @@ export class DingTalkCards {
     }
     this.context.state.set(cards(id), card)
     const taskLabel = card.ticketId ? `#${card.ticketId.slice(0, 12)}` : ''
+    const eventLabel = this.context.triggers.get(card.triggerId)?.channel?.address.eventLabel
+    const heading = [taskLabel, eventLabel].filter(Boolean).join(' · ')
     const flowStatus = placeholder ? '1' : card.messages!.at(-1)!.flowStatus
     const text = placeholder ? message.text : card.messages!.map(item => item.text).join('\n\n---\n\n')
-    const data = { title: [taskLabel, this.robotName].filter(Boolean).join(' '),
+    const data = { title: [heading, this.robotName].filter(Boolean).join(' '),
       status: flowStatus === '1' ? '处理中' : flowStatus === '2' ? '输出中' : '完成',
-      markdown: taskLabel ? `${taskLabel}\n\n${text}` : text, flowStatus,
+      markdown: heading ? `${heading}\n\n${text}` : text, flowStatus,
       replyHint: '---\n\n引用此卡片以回复消息。',
     }
     const body = { outTrackId: id, cardData: { cardParamMap: data } }

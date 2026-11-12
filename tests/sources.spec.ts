@@ -1209,6 +1209,11 @@ describe('observing the GitHub repository', () => {
       if (path === 'issues/comments') return included([{ id: 88, body: '@agent-bot[bot] please check',
         user: { login: 'alice', type: 'User' }, updated_at: at(2), issue_url: 'https://api.github.com/repos/acme/widgets/issues/6' }])
       if (path === 'pulls/comments') return included([])
+      if (path === 'commits/main') return JSON.stringify({ sha: 'abc1234567' })
+      if (path === 'commits/abc1234567/check-runs') return JSON.stringify([{ check_runs: [] }])
+      if (path === 'actions/runs') return JSON.stringify([{ workflow_runs: [] }])
+      if (path === 'issues/5/timeline') return JSON.stringify([[{ id: 90, event: 'review_requested', created_at: at(2),
+        actor: { login: 'alice', type: 'User' }, requested_reviewer: { login: 'agent-bot[bot]', type: 'Bot' } }]])
       if (path === 'pulls/5') return JSON.stringify({ ...openPull(5), user: { login: 'carol', type: 'User' }, created_at: at(-24) })
       if (path === 'pulls/5/reviews') return JSON.stringify([[{ id: 77, user: { login: 'alice', type: 'User' },
         body: 'Approved', state: 'APPROVED', submitted_at: at(2) }]])
@@ -1218,6 +1223,7 @@ describe('observing the GitHub repository', () => {
       await pollRound(h)
       expect(calls.some(path => path.includes('notifications'))).toBe(false)
       expect(h.receive.mock.calls.some(([trigger]) => trigger.meta.kind === 'review')).toBe(true)
+      expect(h.engine.candidate(key('github-request', '90'))?.strength).toBe('explicit')
       expect(h.receive.mock.calls.some(([trigger]) => trigger.meta.number === 6 && trigger.addressed === 'mention')).toBe(true)
       expect(h.sources.instance('github')!.config.observeComments).toBe(false)
     } finally { h.store.close() }

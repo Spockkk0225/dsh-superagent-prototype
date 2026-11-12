@@ -46,6 +46,7 @@ import { sourceContextOf, type SourceContextDeps } from './source-context.ts'
 import type { ResourceHost } from './resources.ts'
 import { mainTools, type MainToolsHost } from './tools/main.ts'
 import { executorTools, type ExecutorToolsHost } from './tools/executor.ts'
+import { githubEventLabel } from '../sources/github-events.ts'
 
 // Source plugins interact with dsh-superagent exclusively through the `SourceHost` service interface.
 declare module '@deepseek-ai/cordis' { interface Context { orchestrator: SourceHost } }
@@ -84,7 +85,8 @@ export class Runtime extends Service implements SourceHost {
   private readonly toolHost: MainToolsHost & ExecutorToolsHost
   /** Non-zero while a main-Session tool is executing an Engine command, suppressing self-triggered domain event notices. */
   private quiet = 0
-  constructor(ctx: Context, readonly machine: Machine, restart: () => void) {
+  constructor(ctx: Context, readonly machine: Machine, restart: () => void, notificationGroup?: string,
+    received?: (trigger: Trigger) => void) {
     super(ctx, 'orchestrator')
     const runtime = this
     // Lock the state directory before opening the database so another process cannot migrate or write concurrently.
@@ -158,7 +160,23 @@ export class Runtime extends Service implements SourceHost {
         health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing() })
       this.sourceDeps = { store, engine, outbox, commands, sources, get ready() { return runtime.ready },
         get deployment() { return setup.deployment }, configured: () => setup.configured(),
-        get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => passes.receive(trigger) }
+        get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => {
+          const incoming = trigger.source === 'github' && notificationGroup ? { ...trigger,
+            channel: { source: 'dingtalk', thread: `dingtalk:${notificationGroup}`,
+              address: { conversationId: notificationGroup, triggerId: trigger.id, eventLabel: githubEventLabel(trigger) } } } : trigger
+          return store.atomic(() => {
+            const result = passes.receive(incoming)
+            if (result === 'stored' && incoming.source === 'github') {
+              sessions.relay(`github-event:${incoming.id}`, JSON.stringify({ kind: 'github_event',
+                ...triggerMessage(incoming, incoming.url ? { source_url: incoming.url } : {}),
+                event: githubEventLabel(incoming), human: incoming.human, meta: incoming.meta,
+                reply_channel: incoming.channel, delivered_to: store.triggers.disposition(incoming.id)?.fanout ?? [],
+                note: 'Source event notification, not a second task. Existing candidate and follow_up messages govern routing; this event grants no additional work authority.' }))
+              if (incoming.channel?.source === 'dingtalk') received?.(incoming)
+            }
+            return result
+          })
+        } }
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),

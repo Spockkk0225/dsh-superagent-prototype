@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { loadEnvFile } from 'node:process'
 import { resolve, join } from 'node:path'
 import { mkdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { lockSync } from 'proper-lockfile'
 import { z } from 'zod'
 import { Runtime } from './app/runtime.ts'
@@ -95,13 +96,22 @@ async function main(): Promise<void> {
     await stopped
   })()
   try {
-    runtime = new Runtime(ctx, machine, () => { log('restart_required'); void stop() })
+    runtime = new Runtime(ctx, machine, () => { log('restart_required'); void stop() },
+      process.env.DINGTALK_GITHUB_NOTIFY_CONVERSATION_ID?.trim() || undefined, trigger => robot?.received(trigger))
     runtime.lifetime.addEventListener('abort', () => { githubController.abort(); robot?.stop(); void harness.close() }, { once: true })
     runtime.sources.register(githubKind)
     const kind = dingTalkKind(message => robot!.send(message))
     runtime.sources.register(kind)
     await runtime.ready
     if (!runtime.configured()) throw new Error(`Setup: ${runtime.setupProblem?.detail ?? 'not configured'}`)
+    // Export once at startup, then keep using the original static allowed list and gate.
+    const allowed = githubKind.policy!.schema.parse({ allowed: JSON.parse(await runtime.commands.run('python3', [
+      fileURLToPath(new URL('../scripts/export-github-admins', import.meta.url)),
+      runtime.commands.deployment.repository, runtime.commands.deployment.github.cli,
+    ]).catch(() => { throw new Error('Setup: GitHub admin export failed; the saved allowed list was kept') })) }).allowed
+    const policy = runtime.store.settings().policy
+    await runtime.settings.save('policy', { ...policy, sources: { ...policy.sources,
+      github: { ...policy.sources.github, allowed } } }, runtime.store.blockRevision('policy'), 'sync')
     robot = new DingTalk(runtime.context(kind), { clientId, clientSecret }, log, fetch,
       process.env.DINGTALK_CARD_TEMPLATE_ID, process.env.DINGTALK_ROBOT_NAME)
     await harness.listen()

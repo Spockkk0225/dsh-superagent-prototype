@@ -90,7 +90,7 @@ export function dingTalkTrigger(raw: unknown, context: SourceContext): { trigger
   const saved = reference ? context.state.get(tickets(message.conversationId, reference)) : undefined
   const matches = reference ? (saved ? [context.tickets.get(saved)].filter(ticket => !!ticket)
     : context.tickets.open().filter(ticket => ticket.id.startsWith(reference)))
-    .filter(ticket => context.triggers.get(ticket!.origin.triggerId)?.meta.conversationId === message.conversationId) : []
+    .filter(ticket => context.triggers.get(ticket!.origin.triggerId)?.channel?.address.conversationId === message.conversationId) : []
   // Unknown/ambiguous references get their own evaluation, never fan out to another group's ticket.
   const origin = matches.length === 1 ? context.triggers.get(matches[0]!.origin.triggerId) : undefined
   const threads = origin?.threads ?? [{ source: 'dingtalk', id }]
@@ -131,7 +131,7 @@ export class DingTalk {
           if (parsed.body) context.state.set(bodies(parsed.trigger.id), parsed.body)
           const result = context.receive(parsed.trigger)
           if (result instanceof Promise) throw new Error('DingTalk intake must commit synchronously')
-          if (result === 'stored') this.cards?.received(parsed.trigger)
+          if (result === 'stored') this.received(parsed.trigger)
           return result
         })
         // Acknowledge only after the event and pending work have committed.
@@ -144,6 +144,8 @@ export class DingTalk {
       catch { this.log('dingtalk_connection_failed'); throw new Error('DingTalk Stream authentication or connection failed') }
     }
   }
+  /** Use the same receipt card for native messages and externally bound event requests. */
+  received(trigger: Trigger): void { this.cards?.received(trigger) }
   async start(): Promise<void> {
     await this.client.connect()
     if (!this.client.connected) { this.client.disconnect(); throw new Error('DingTalk Stream did not connect') }
@@ -165,21 +167,22 @@ export class DingTalk {
   async send(message: OutboundMessage): Promise<void> {
     const conversation = message.channel.address.conversationId!
     const route = this.context.state.get(routes(conversation))
-    if (!route) throw new Error('DingTalk reply route is unavailable')
     if (message.ticketId) this.context.state.set(tickets(conversation, message.ticketId.slice(0, 12)), message.ticketId)
-    const text = message.ticketId ? `${label(message.ticketId)} ${message.text}` : message.text
+    const eventLabel = message.channel.address.eventLabel
+    const heading = [message.ticketId ? label(message.ticketId) : '', eventLabel ?? ''].filter(Boolean).join(' · ')
+    const text = heading ? `${heading}${eventLabel ? '\n' : ' '}${message.text}` : message.text
     if (text.length > 4000) throw new Error('DingTalk result exceeds 4000 characters; provide a brief result and a link')
     if (this.cards) { await this.cards.send(message); return }
-    const url = new URL(route.webhook)
-    if (url.protocol !== 'https:' || url.hostname !== 'oapi.dingtalk.com') throw new Error('Invalid DingTalk session webhook')
+    const url = route ? new URL(route.webhook) : undefined
+    if (url && (url.protocol !== 'https:' || url.hostname !== 'oapi.dingtalk.com')) throw new Error('Invalid DingTalk session webhook')
     const token = await this.accessToken()
     // A long coding task can outlive the session webhook. Use the application group-send API after expiry.
-    const active = route.expires > Date.now() + 5000
-    const response = await this.http(active ? url : 'https://api.dingtalk.com/v1.0/robot/groupMessages/send', {
+    const active = !!route && route.expires > Date.now() + 5000
+    const response = await this.http(active ? url! : 'https://api.dingtalk.com/v1.0/robot/groupMessages/send', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-acs-dingtalk-access-token': token },
       signal: AbortSignal.timeout(15000), body: JSON.stringify(active
         ? { msgtype: 'text', text: { content: text } }
-        : { robotCode: route.robotCode, openConversationId: conversation, msgKey: 'sampleText', msgParam: JSON.stringify({ content: text }) }),
+        : { robotCode: route?.robotCode ?? this.credentials.clientId, openConversationId: conversation, msgKey: 'sampleText', msgParam: JSON.stringify({ content: text }) }),
     })
     const data = await response.json() as { errcode?: number; code?: string; processQueryKey?: string }
     if (!response.ok || (active ? data.errcode !== 0 : !!data.code || !data.processQueryKey)) {

@@ -19,7 +19,7 @@ npm test
 npm run build
 ```
 
-Set the installation variables **before the first start**; see [codex.example.env](../codex.example.env). Credentials may remain in the existing env file:
+Set the installation variables **before the first start**; see [.env.template](../.env.template). Credentials may remain in the existing env file:
 
 ```sh
 SUPERAGENT_REPOSITORY=/absolute/path/to/local/neug \
@@ -40,12 +40,24 @@ To explicitly run main and Worker session commands directly on the host, set `CO
 ## Start on another computer
 
 1. Install the required Node.js/pnpm versions, Git, an authenticated GitHub CLI with push access, and a compatible authenticated Codex CLI. Clone this adapted repository and the target repository onto the new computer.
-2. In this adapted repository, run `pnpm install --frozen-lockfile` and `npm run build`. Copy `codex.example.env` to `.env` (ignored by Git), then fill in the DingTalk application credentials and the new computer's absolute repository, state and Codex executable paths. Set `CODEX_SANDBOX=danger-full-access` for the explicitly selected host-execution mode, or choose a sandbox as described above.
+2. In this adapted repository, run `pnpm install --frozen-lockfile` and `npm run build`. Copy `.env.template` to `.env` (ignored by Git), then fill in the DingTalk application credentials and the new computer's absolute repository, state and Codex executable paths. Set `CODEX_SANDBOX=danger-full-access` for the explicitly selected host-execution mode, or choose a sandbox as described above.
 3. Stop the old service before connecting the same DingTalk robot on the new computer. Start with `npm run start:codex -- --env-file .env`, wait for `ready`, then mention the robot in its group.
 
 These steps start a fresh installation. Runtime state, credentials, ticket worktrees and Codex conversation history are not included in Git. Continuing old tickets requires a separate coordinated migration of the state database, worktrees and Codex history, with their saved paths accounted for; copying just the database is insufficient. An existing state directory also retains its saved installation settings, including the old prepare command's repository path.
 
 ## Settings and state
+
+### GitHub App polling and DingTalk notifications
+
+App mode discovers assignments to the agent, individual PR review requests, and mentions in repository comments without the user notifications API or the repository-wide observe switches. Assignment and review-request actors still pass the existing static allowed list, populated from repository admin users at each Codex startup. Review requests have independent event threads; a robot-created PR bound to a ticket keeps its existing subscriptions, including unmentioned comments, reviews, CI and closure after a ready report.
+
+App mode reuses the existing branch CI polling on **main**, including its Nightly checks. Failure-set changes and recovery enter the existing trigger flow, including a failure already present at first startup. The existing admission and work authorization rules still apply; CI does not create a new kind of task or grant work authority.
+
+For main workflows triggered by `schedule`, App mode also polls completed [Actions runs](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-repository). Every completion after monitoring starts is delivered, including success, cancellation and a rerun of the same commit. Run ID and attempt identify the event for deduplication. This uses the same event-to-main-agent path and does not depend on a change in the aggregate failure set or on the commit still being main's latest head.
+
+Every newly received GitHub event is also delivered to the main Session as a durable `github_event` prompt, including events that do not become candidates under the existing admission policy. This covers main CI transitions as well as directed requests and subscribed PR activity. Repeated polls of the same event do not enqueue another prompt. Existing candidate routing, worker subscriptions and work authorization remain unchanged.
+
+Set `DINGTALK_GITHUB_NOTIFY_CONVERSATION_ID` in the actual env file to select the acknowledgement and summary destination for GitHub-triggered work. Leaving it unset keeps the original GitHub reply destination. Intake retains the GitHub source, actor, text, PR/Issue metadata and URL for the worker, while binding the existing task reply channel to the configured group. From dispatch onward this is the same flow as requesting a review from DingTalk: the worker performs GitHub operations with gh, reports internally, and the main agent delivers a summary to DingTalk. There is no reply copying, separate notification scheduler or result scan. When cards are enabled, intake creates the existing waiting card, acceptance updates it with the acknowledgement, and the main agent's result reply updates the same card again. With cards disabled, replies use text. Messages with a ticket ID include a source label such as `#77fb51f5cabc · GitHub Issue Assign`. The robot must belong to the group and have the relevant card or group-message send permissions.
 
 ### GitHub App identity
 

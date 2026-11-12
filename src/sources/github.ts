@@ -15,6 +15,7 @@ import { KV } from '../kv.ts'
 import { cursorAt, pause, POLL_HORIZON_MS, pollThreads as pollEach } from './poll.ts'
 import type { Localized, SourceKind } from './kind.ts'
 import { z } from 'zod'
+import { pollRequests, pollScheduledCi } from './github-events.ts'
 
 export { commentTrigger, type GithubComment } from './github-trigger.ts'
 /** A notification of the agent account; `subject.url` is the API address of its Issue or PR. */
@@ -191,7 +192,7 @@ async function pollRepository(ctx: SourceContext, round: Round): Promise<void> {
   // App installations have no personal notification inbox. Read repository streams to discover mentions;
   // the unchanged Source configuration and policy still decide which unaddressed events are admitted.
   const config = ctx.deployment.github.auth === 'app'
-    ? { ...stored, observeIssues: true, observePulls: true, observeComments: true } : stored
+    ? { ...stored, observeIssues: true, observePulls: true, observeComments: true, observeCi: true } : stored
   for (const stream of STREAMS) {
     if (stopped(ctx, round)) return
     if (!stream.observed(config)) { ctx.state.set(KV.github.stream(stream.id), undefined); continue }
@@ -206,6 +207,10 @@ async function pollRepository(ctx: SourceContext, round: Round): Promise<void> {
   }
   try { await pollBranchCi(ctx, round) }
   catch (error) { if (!stopped(ctx, round)) round.failures.push(`default branch CI: ${String(error)}`) }
+  if (ctx.deployment.github.auth === 'app' && !stopped(ctx, round)) {
+    try { await pollScheduledCi(ctx, 'main', round.started, round.signal) }
+    catch (error) { if (!stopped(ctx, round)) round.failures.push(`scheduled CI: ${String(error)}`) }
+  }
 }
 /**
  * Polls one repository-wide event stream (oldest first) since its cursor and steps the cursor to five seconds before the
@@ -237,15 +242,19 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
   for (const item of items) {
     // Stopping mid-stream aborts before advancing the cursor so unread items are retried.
     if (stopped(ctx, round)) throw new Error('The GitHub Source stopped during the poll')
-    if (sameName(item.user.login, login)) continue
+    if (sameName(item.user.login, login) && !(id === 'issues' && ctx.deployment.github.auth === 'app')) continue
     if (id === 'issues') {
       const issue = IssueSchema.safeParse(item)
       const pr = issue.success && !!issue.data.pull_request
+      if (issue.success && ctx.deployment.github.auth === 'app') {
+        await pollRequests(ctx, issue.data.number, !!pr, since, issue.data.title, issue.data.body, round.signal)
+      }
       if (issue.success && pr && ctx.deployment.github.auth === 'app') {
         round.read.add(issue.data.number)
         await readNotified(ctx, round, issue.data.number, { since, pr: true })
         continue
       }
+      if (sameName(item.user.login, login)) continue
       if (!issue.success || !fresh(issue.data.created_at, pr ? 'pulls' : 'issues')) continue
       await ctx.receive(pr ? pullTrigger(issue.data, login) : issueTrigger(issue.data, login))
       nameThread(ctx, issue.data.number, issue.data.title)
@@ -265,10 +274,11 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
   // The ETag belongs to this request, which the next round repeats only while the cursor stays unchanged.
   ctx.state.set(name, { since: next, started, ...etag && next === since ? { etag } : {} })
 }
-/** Polls default-branch CI checks, emitting a trigger only when the set of failing checks changes after the initial baseline. */
+/** Reuses branch CI snapshots: main for App mode, default branch for users; App mode also reports a startup failure. */
 async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
   const commands = ctx.commands.withSignal(round.signal)
-  const { default_branch: branch } = await commands.api(z.looseObject({ default_branch: z.string() }), '')
+  const app = ctx.deployment.github.auth === 'app'
+  const branch = app ? 'main' : (await commands.api(z.looseObject({ default_branch: z.string() }), '')).default_branch
   const head = await commands.api(z.looseObject({ sha: z.string() }), `commits/${encodeURIComponent(branch)}`)
   const snapshot = await pullChecks(commands, head.sha, round.tally)
   const previous = ctx.state.get(KV.github.branchCi)
@@ -279,7 +289,7 @@ async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
   // Retain previous failures while checks are still running so recovery is reported only once all checks pass.
   const now = failures.length || !counts.running ? failures : known ?? []
   let revision = previous?.revision ?? 0
-  if (known && JSON.stringify(now) !== JSON.stringify(known)) {
+  if (known ? JSON.stringify(now) !== JSON.stringify(known) : app && counts.failed > 0) {
     revision += 1
     const summary = ciSummary(snapshot, branch, `github/commits/${head.sha}/checks`)
     const url = `https://github.com/${ctx.deployment.repository}/commit/${head.sha}`
@@ -458,7 +468,7 @@ export async function pollThreads(ctx: SourceContext, signal?: AbortSignal, roun
 }
 async function pollThread(ctx: SourceContext, round: Round, thread: Thread): Promise<void> {
   // The default branch's CI Thread has no Issue or PR to read; its CI arrives as Triggers.
-  if (thread.ref.id.startsWith('ci:')) return
+  if (thread.ref.id.startsWith('ci:') || thread.ref.id.startsWith('request:')) return
   const number = Number(thread.ref.id)
   if (!number) throw new Error('Subscribed thread has no GitHub issue or PR number')
   round.read.add(number)
