@@ -14,6 +14,8 @@ export interface OutboxHost {
   paused(): boolean
   /** Fix transport correlations before delivery can race with another incoming event. */
   prepare?(message: OutboundMessage): OutboundMessage
+  /** Additional destinations for the same explicit reply, persisted atomically with independent retry receipts. */
+  mirrors?(message: OutboundMessage): OutboundMessage[]
 }
 
 /**
@@ -32,14 +34,24 @@ export class Outbox implements OutboxPort {
     const { store, effects } = this.host
     store.atomic(() => {
       if (store.receipts.get(message.id)) return
-      const prepared = this.host.prepare?.(message) ?? message
-      if (store.receipts.add(prepared)) effects.enqueue('reply', message.id, {})
+      let prepared = this.host.prepare?.(message) ?? message
+      const mirrors = this.host.mirrors?.(prepared) ?? []
+      if (mirrors.length) prepared = { ...prepared, channel: { ...prepared.channel,
+        address: { ...prepared.channel.address, mirrorIds: JSON.stringify(mirrors.map(item => item.id)) } } }
+      for (const outgoing of [prepared, ...mirrors]) {
+        if (store.receipts.add(outgoing)) effects.enqueue('reply', outgoing.id, {})
+      }
     })
   }
   status(id: string): ReplyStatus | undefined { return this.host.store.receipts.get(id)?.status }
   withdraw(id: string): void {
     const { store, effects } = this.host
-    store.atomic(() => { if (store.receipts.withdraw(id)) effects.cancel('reply', id) })
+    store.atomic(() => {
+      const saved = store.receipts.get(id)
+      const mirrors = saved?.channel.address.mirrorIds
+      const ids: string[] = [id, ...mirrors ? JSON.parse(mirrors) as string[] : []]
+      for (const outgoing of ids) if (store.receipts.withdraw(outgoing)) effects.cancel('reply', outgoing)
+    })
   }
   sent(): Promise<void> { return this.host.effects.idle('reply') }
   private async deliver(id: string): Promise<void> {

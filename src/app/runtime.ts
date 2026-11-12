@@ -16,7 +16,7 @@ import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
 import { allowedSender, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
-import { acknowledgeCard, bindDingTalkReply, pendingCardReplies, remindCardReply, replyToCard } from '../sources/dingtalk-cards.ts'
+import { acknowledgeCard, bindDingTalkReply, githubMentionReplies, pendingCardReplies, remindCardReply, replyToCard } from '../sources/dingtalk-cards.ts'
 import { Commands } from '../infra/commands.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import { environmentOf, ticketEnvironment, type Variable } from './execution-environment.ts'
@@ -139,7 +139,8 @@ export class Runtime extends Service implements SourceHost {
         settings: () => store.settings(), paused: () => this.paused(), threadContext: trigger => sources.threadContext(trigger),
         deliver: (id, text) => sessions.prompt(masterId, id, text, 'steer'), candidateCard: candidate => candidateCard(links, candidate) })
       const outbox = this.outbox = new Outbox({ store, effects, sources, commands, paused: () => this.paused(),
-        prepare: message => bindDingTalkReply(runtime.context({ kind: 'dingtalk', health: [] }), message) })
+        prepare: message => bindDingTalkReply(runtime.context({ kind: 'dingtalk', health: [] }), message),
+        mirrors: message => githubMentionReplies(runtime.context({ kind: 'dingtalk', health: [] }), message) })
       const { assessor, executor } = this
       const policy = () => settingsPolicy(store.settings(), sources)
       const engine = this.engine = new Engine({ repo: store, scope: sources, policy, assessor, executor,
@@ -189,15 +190,16 @@ export class Runtime extends Service implements SourceHost {
         get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => {
           // PR CI is not monitored or dispatched. Only main/default-branch CI and scheduled runs are monitored.
           if (trigger.source === 'github' && trigger.meta.ci === true && trigger.meta.isPr === true) return 'filtered'
-          // Unaddressed PR discussion belongs only to a task explicitly bound to that PR.
+          // Unmentioned discussion is actionable only on a PR opened by the task (own=true).
           if (trigger.source === 'github' && !trigger.addressed
             && ['conversation', 'inline', 'review'].includes(String(trigger.meta.kind))) {
             const thread = store.threads.get(`github:${trigger.meta.number}`)
-            const bound = trigger.meta.isPr === true && thread?.subscriptions.some(id => {
+            const own = trigger.meta.isPr === true && thread?.subscriptions.some(id => {
               const ticket = store.tickets.get(id)
-              return ticket?.ended?.by !== 'human' && ticket?.follows?.some(follow => follow.thread === thread.key)
+              return ticket?.ended?.by !== 'human'
+                && ticket?.follows?.some(follow => follow.thread === thread.key && follow.own === true)
             })
-            if (!bound) return 'filtered'
+            if (!own) return 'filtered'
           }
           const incoming = trigger.source === 'github' && notificationGroup ? { ...trigger,
             channel: { source: 'dingtalk', thread: `dingtalk:${notificationGroup}`,

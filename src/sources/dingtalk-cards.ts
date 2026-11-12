@@ -2,6 +2,7 @@
 import { key, type OutboundMessage, type Trigger } from '../core/index.ts'
 import { family } from '../kv.ts'
 import type { SourceContext } from './host.ts'
+import { githubChannel } from './github-trigger.ts'
 
 interface Card {
   triggerId: string; conversationId: string; templateId: string; used: boolean; sent: boolean
@@ -10,6 +11,8 @@ interface Card {
   informational?: boolean
   replyReminded?: boolean
   acknowledgementId?: string
+  githubMentions?: string[]
+  githubMirrorSuppressed?: boolean
   messages?: { id: string; text: string; flowStatus: '2' | '3' }[]
 }
 const cards = family<Card, [string]>('dingtalk-card:')
@@ -22,6 +25,31 @@ const activeKey = (conversation: string, ticket: string) => activeCards(key(conv
 const triggerKey = (conversation: string, trigger: string, ticket = '') => triggerCards(key(conversation, trigger, ticket))
 const closed = (card: Card) => card.closed ?? card.messages?.at(-1)?.flowStatus === '3'
 const acknowledged = (card: Card) => !!card.acknowledgementId || !!card.messages?.some(message => message.flowStatus === '2')
+
+/** Explicit confirmation/results for GitHub mentions are delivered to GitHub as well as the bound IM channel. */
+export function githubMentionReplies(context: SourceContext, message: OutboundMessage): OutboundMessage[] {
+  if (message.channel.source !== 'dingtalk' || !['acknowledgement', 'reply'].includes(message.kind)) return []
+  const cardId = message.channel.address.cardId
+  const card = cardId ? context.state.get(cards(cardId)) : undefined
+  // An IM follow-up in this round may contain private context; it does not authorize publishing that context to GitHub.
+  if (card?.githubMirrorSuppressed) return []
+  const ids = card?.githubMentions?.length ? card.githubMentions : [message.channel.address.triggerId ?? '']
+  const targets = new Map<string, Trigger>()
+  for (const id of ids) {
+    const trigger = context.triggers.get(id)
+    if (trigger?.source !== 'github' || !trigger.human || !trigger.addressed) continue
+    const number = Number(trigger.meta.number)
+    if (!Number.isInteger(number) || number < 1) continue
+    const root = trigger.meta.kind === 'inline' ? String(trigger.meta.inReplyTo ?? trigger.meta.commentId) : ''
+    targets.set(key(String(number), root), trigger)
+  }
+  const prefix = 'This is by an automated agent, not a human.'
+  return [...targets].map(([target, trigger]) => ({ ...message,
+    id: key('github-mention-reply', message.id, target),
+    channel: githubChannel(Number(trigger.meta.number), trigger.url),
+    text: message.text.startsWith(prefix) ? message.text : `${prefix}\n\n${message.text}`,
+  }))
+}
 
 /** Explicit replies are required for current bound rounds, including no-op and ignored requests. */
 export function pendingCardReplies(context: SourceContext, ticketId?: string) {
@@ -146,10 +174,17 @@ export class DingTalkCards {
         this.context.state.set(activeKey(conversation, ticket), id)
         this.context.state.set(taskCards(ticket), id)
       }
+      const githubMention = trigger.source === 'github' && trigger.human && !!trigger.addressed
       // Additional inputs in an executing round share its card and create no extra receipt.
-      if (id === active) continue
+      if (id === active) {
+        if (githubMention || trigger.source !== 'github') this.context.state.set(cards(id), { ...previous!,
+          ...githubMention ? { githubMentions: [...new Set([...previous?.githubMentions ?? [], trigger.id])] } : {},
+          ...trigger.source !== 'github' ? { githubMirrorSuppressed: true } : {} })
+        continue
+      }
       this.context.state.set(cards(id), { triggerId: trigger.id, conversationId: conversation,
         templateId: this.templateId, used: false, sent: false, closed: false,
+        ...githubMention ? { githubMentions: [trigger.id] } : {},
         ...ticket ? { ticketId: ticket } : {} })
       this.context.notify({ id: ticket ? key('dingtalk-round-received', id) : receiptId(trigger.id), kind: 'notice',
         channel: { ...trigger.channel!, address: { ...trigger.channel!.address, cardId: id } },
