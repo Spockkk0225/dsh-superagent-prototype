@@ -143,7 +143,7 @@ export class Runtime extends Service implements SourceHost {
           const context = runtime.context({ kind: 'dingtalk', health: [] })
           const current = ticket ? workerReplyCard(context, ticket.id) : undefined
           const pending = pendingCardReplies(context, ticket?.id).filter(card => !ticket || card.card_id === current?.card_id)
-          return pending.length ? `\n## Bound cards requiring initial confirmation and final reply\n${JSON.stringify(pending)}\nEvery bound card requires an initial agent confirmation before processing and an explicit final reply when its round ends, for both human requests and system events. If initial_confirmation_required is true, use orchestrator_card_reply action=acknowledge; the automatic receipt does not count. Use the normal result/answer/attention reply when authorized, or orchestrator_card_reply action=reply for a factual terminal no-action, ignored, duplicate, cancelled or failed outcome. An internal report or assistant text does not update a card. Main agent: do not finish a worker's card while it is still executing; complete it after the worker's handoff. Do not duplicate an existing confirmation or final reply.` : ''
+          return pending.length ? `\n## Bound cards requiring initial confirmation and final reply\n${JSON.stringify(pending)}\nEvery bound card requires an initial agent confirmation before processing and an explicit final reply when its round ends, for both human requests and system events. If initial_confirmation_required is true, use orchestrator_card_reply action=acknowledge; the automatic receipt does not count. Use the normal result/answer/attention reply when authorized, or orchestrator_card_reply action=reply for a factual terminal no-action, ignored, duplicate, cancelled or failed outcome. An internal report or assistant text does not update a card. Main agent: do not finish a worker's card while it is still executing; complete it after the worker's handoff. Do not duplicate a confirmation or final reply already queued for this exact card. A reply on another card does not satisfy this card.` : ''
         },
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }
@@ -197,7 +197,7 @@ export class Runtime extends Service implements SourceHost {
           store.atomic(() => {
             if (!remindCardReply(context, card.card_id)) return
             sessions.relay(`card-reply-required:${card.card_id}`, JSON.stringify({ kind: 'card_reply_required', ...card,
-              note: 'This card requires an initial agent confirmation and an explicit final reply. If initial_confirmation_required is true, send action=acknowledge first. Check the disposition or worker handoff, then reply on this exact card. Ignored, duplicate and no-action outcomes must be stated explicitly. Do not invent completion or send a duplicate ticket result.' }))
+              note: 'This card requires an initial agent confirmation and an explicit final reply. If initial_confirmation_required is true, send action=acknowledge first. Check the disposition or worker handoff, then reply on this exact card. Ignored, duplicate and no-action outcomes must be stated explicitly. A reply on another card does not satisfy this card. Do not invent completion.' }))
           })
         }
       }

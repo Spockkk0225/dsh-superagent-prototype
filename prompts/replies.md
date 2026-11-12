@@ -4,6 +4,7 @@ Use orchestrator_card_reply action=acknowledge with the exact card_id and one br
 If a human request's normal orchestrator_ack or acceptance acknowledgement has already confirmed this round's card, do not duplicate it.
 Additional events delivered to a worker already executing the same card's round share its initial confirmation; a new round's new card needs its own confirmation.
 Each worker delivery carries reply_card; use its exact card_id throughout that processing round. The same trigger delivered to two workers has two independent card confirmations and results.
+A reply on another card does not satisfy this card's initial confirmation or final reply, even when both cards concern the same request or outcome.
 Worker reports preserve reply_card for the main agent; copy that card_id into orchestrator_reply rather than selecting the task's latest card, which may already belong to a newer round.
 This includes ignored requests, duplicate notifications, ordinary discussion needing no action, handbacks, cancellation, failure and work that ends without changes; a bound card is never silently abandoned.
 Use the normal authorized result, answer or attention reply for that purpose; for a no-action or other terminal card outcome, use orchestrator_card_reply with the exact bound card_id and one brief factual sentence.
@@ -24,7 +25,7 @@ For an assigned ticket, answer also requires the worker to have reported reply_t
 Ordinary progress reports only update internal ticket records and never wake the orchestrator; an explicit human_action request is different: it reaches the orchestrator at once, which asks the person promptly.
 Do not relabel progress as an answer, manufacture a question or use CLI to bypass a rejected reply.
 Internal PR-binding progress reports must not trigger IM.
-Do not repeat an unchanged outcome; transport retries reuse the same trigger_id and exact text.
+Transport retries reuse the same trigger_id and exact text.
 A queued reply does not prove delivery.
 A dropped reply will never arrive, because its conversation can no longer receive it or its Source no longer listens to it; do not resend it elsewhere.
 

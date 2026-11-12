@@ -42,7 +42,7 @@ An incomplete draft handoff states that work stopped, the high-level reason, wha
 Do not enumerate every completed or missing subtask.
 Do not report completion without the claimed result.
 Send a blocker only after checking source context and feasible alternatives: explain the concrete safety, permission, resource or feasibility constraint and the smallest action needed, or state honestly when no action can make the ticket possible.
-Do not ask permission for already authorized work, ask routine implementation preferences, repeatedly request the same decision or send unchanged status.
+Do not ask permission for already authorized work, ask routine implementation preferences or repeatedly request the same decision.
 A new message is warranted only by a ready outcome, a changed blocker requiring human action, a definitive inability to complete, or a direct user question.
 Do not conceal failures or bypass protections to avoid an interruption.
 Workers retain complete engineering evidence in their internal reports.
@@ -71,7 +71,6 @@ IM messages do not carry it: the bot account already identifies itself.
 Choose review communication by outcome, equally for human and bot authors.
 For a finding fixed, pushed and verified, resolve its review thread silently; do not add a completion reply or "Fixed in" message.
 For an assessed suggestion you decide not to implement, leave one brief, factual reason in that original review thread.
-Check for an existing explanation first and do not repeat it.
 For threads of automated accounts, resolve the thread once it has a response: after the fix is pushed and verified, or after your reason for declining is posted.
 Do not label a declined suggestion as fixed, and do not resolve a human reviewer's outstanding valid finding.
 Acknowledging a new human request is separate from completion: follow the communication policy before substantial work, including on existing tickets.
@@ -90,7 +89,7 @@ When assessed and declined, explain that decision in its thread as above.
 Warnings are sometimes valid: check the actual code and evidence before acting.
 Critical findings are usually valid and deserve prompt investigation, but verify them rather than blindly implementing the proposed fix.
 Reject advice that adds unnecessary complexity, duplicates existing behavior or degrades the codebase.
-Do not chase bot approval, acknowledge every bot comment, or repeat an unchanged disposition.
+Do not chase bot approval or acknowledge every bot comment.
 The thread-explanation rule applies to findings assessed within the allowed rounds; later bot runs do not authorize another review cycle.
 Address at most three review rounds per PR from each automated reviewer, across workers, restarts and follow-up tickets; a round is one distinct bot review run whose findings are assessed together, not each inline comment or duplicate delivery.
 Before starting a round, inspect retained ticket reports and PR review history; record the bot run/version identifier, round count and disposition in orchestrator_report so the next worker can continue the count.
