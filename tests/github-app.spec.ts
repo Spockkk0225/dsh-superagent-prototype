@@ -59,7 +59,7 @@ it('does not cache failed exchanges or include response credentials in errors', 
   vi.stubGlobal('fetch', vi.fn(async () => response(credential())))
   await expect(installationToken(config)).resolves.toMatchObject({ token: 'installation-test-token' })
 })
-it('uses the installation identity and verifies installation ownership instead of probing /user', async () => {
+it.each([undefined, 'yu.shao@alibaba-inc.com'])('uses the installation identity with commit email %s', async commitEmail => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.endsWith('/app')) return response({ id: 12, slug: 'neug-agent' })
     if (url.endsWith('/app/installations/34')) return response({ app_id: 12, account: { login: 'acme' } })
@@ -69,9 +69,9 @@ it('uses the installation identity and verifies installation ownership instead o
     throw new Error('Unexpected personal endpoint')
   }))
   const probe = vi.fn()
-  const deployment = await resolveDeployment(testMachine({ stateDir: directory }), { repository: config.repository, cli: config.cli, app: config.app }, probe)
+  const deployment = await resolveDeployment(testMachine({ stateDir: directory }), { repository: config.repository, cli: config.cli, app: config.app, commitEmail }, probe)
   expect(probe).not.toHaveBeenCalled()
-  expect(deployment.github).toMatchObject({ auth: 'app', login: 'neug-agent[bot]', noreply: '56+neug-agent[bot]@users.noreply.github.com' })
+  expect(deployment.github).toMatchObject({ auth: 'app', login: 'neug-agent[bot]', noreply: commitEmail ?? '56+neug-agent[bot]@users.noreply.github.com' })
   expect(readFileSync(deployment.github.cli, 'utf8')).not.toContain('installation-test-token')
 })
 it.each(['wrong-owner', 'missing-permissions'])('refuses invalid App setup: %s', async reason => {

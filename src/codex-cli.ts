@@ -64,6 +64,17 @@ async function main(): Promise<void> {
             prepare: `git -C ${quote(repository)} worktree add -b "agent/$DSH_SUPERAGENT_NAME" "$DSH_SUPERAGENT_DIR" HEAD` },
         }))
       }
+      // An explicit deployment email also updates an already initialized installation.
+      const commitEmail = process.env.SUPERAGENT_GITHUB_COMMIT_EMAIL
+      if (commitEmail !== undefined) {
+        const email = z.email().parse(commitEmail)
+        const settings = store.settings()
+        const github = settings.sources.github!
+        if (github.config.commitEmail !== email) {
+          github.config = { ...github.config, commitEmail: email }
+          store.saveSettings(settings)
+        }
+      }
     } finally { store.close() }
   } finally { release() }
   const machine: Machine = { stateDir, promptMaxChars: reference(100000), admissionContextMaxPages: reference(10),

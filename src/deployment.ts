@@ -46,6 +46,7 @@ export function machineOf(config: DeploymentConfig): Machine {
 export const GithubAccountsSchema = z.object({
   repository: z.string().trim().regex(/^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?$/, 'owner/name').default(''),
   cli: z.string().trim().default(''),
+  commitEmail: z.email().optional(),
   app: GithubAppSchema.optional(),
 })
 export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
@@ -121,7 +122,7 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
         .parse(await appRequest(`/users/${encodeURIComponent(login)}`, credential.token))
       const routedApp = app.installations ? { ...app, installations: app.installations.map((route, index) => ({ ...route, repository: repositories[index]! })) } : app
       return { ...machine, repository, github: { cli: await writeAppCli({ ...config, repository, app: routedApp }), auth: 'app', repositories, login,
-        noreply: `${bot.id}+${login}@users.noreply.github.com` } }
+        noreply: accounts.commitEmail ?? `${bot.id}+${login}@users.noreply.github.com` } }
     } catch { throw new SetupError('githubAppFailed') }
   }
   const text = await probe([cli, 'api', 'user']).catch((error: unknown) => { throw new SetupError('agentCliSignedOut', { output: reason(error) }) })
@@ -134,7 +135,7 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
   if (!access) throw new SetupError('repositoryUnreported', { repository: remote })
   const repository = access.name
   if (access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository })
-  return { ...machine, repository, github: { cli, login: agent.login, noreply: `${agent.id}+${agent.login}@users.noreply.github.com` } }
+  return { ...machine, repository, github: { cli, login: agent.login, noreply: accounts.commitEmail ?? `${agent.id}+${agent.login}@users.noreply.github.com` } }
 }
 
 const AuthStatus = z.object({ appId: z.string().regex(/^cli_[A-Za-z0-9]+$/), brand: z.enum(['feishu', 'lark']).default('feishu'), identities: z.object({ bot: z.object({ status: z.string() }) }) })
