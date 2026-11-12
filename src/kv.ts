@@ -47,7 +47,7 @@ export const KV = {
     scheduledSince: family<string, [branch: string]>('github-scheduled-since:'),
     cursor: family<string, [number: number]>('github-cursor:'),
     stream: family<{ since: string; started: Record<string, string>; etag?: string }, [stream: string]>('github-stream:'),
-    branchCi: record<{ branch?: string; failures?: string[]; revision: number }>('github-branch-ci'),
+    branchCi: record<{ branch?: string; failures?: string[]; revision: number; settled?: string; reported?: string }>('github-branch-ci'),
     ci: family<{ fingerprint: string; revision: number; settled?: string; reported?: string }, [number: number]>('github-ci:') },
   /**
    * Feishu Source: known chats (`true` for direct messages); per-chat history cursor and active topics mapped from topic ID

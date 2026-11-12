@@ -16,7 +16,7 @@ import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
 import { allowedSender, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
-import { bindDingTalkReply } from '../sources/dingtalk-cards.ts'
+import { bindDingTalkReply, pendingCardReplies, remindCardReply, replyToCard } from '../sources/dingtalk-cards.ts'
 import { Commands } from '../infra/commands.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import { environmentOf, ticketEnvironment, type Variable } from './execution-environment.ts'
@@ -124,6 +124,10 @@ export class Runtime extends Service implements SourceHost {
       const sessions = this.sessions = new Sessions({ context: ctx, store, prompts, effects, health: board.claim('models'), masterId,
         lifetime: this.lifetime,
         closing: () => this.closing(), environment,
+        cardReplyInstructions: ticket => {
+          const pending = pendingCardReplies(runtime.context({ kind: 'dingtalk', health: [] }), ticket?.id)
+          return pending.length ? `\n## Bound cards requiring an explicit final reply\n${JSON.stringify(pending)}\nA bound card must never be left silent when its processing round ends. Use the normal result/answer/attention reply when authorized, or orchestrator_card_reply for a factual no-action, ignored, duplicate, cancelled or failed outcome. An internal report or assistant text does not update a card. Main agent: do not finish a worker's card while it is still executing; complete it after the worker's handoff. Do not send the same outcome through both reply paths.` : ''
+        },
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
       const policyChanged: EngineForSettings['policyChanged'] = (from, to, effects) => { this.engine.policyChanged(from, to, effects) }
       this.settings = new Settings({ store, sources, engine: { policyChanged }, health: board, context: ctx, lifetime: this.lifetime, sessions,
@@ -157,16 +161,37 @@ export class Runtime extends Service implements SourceHost {
         } })
       // Update the `evals` health entry on every pass if an evaluation failed as unavailable within the last hour.
       const evals = board.claim('evals', { state: 'ready', detail: 'No unavailable Eval in the last hour' })
-      const evaluateDue = () => { engine.evaluateDue(); evals.set(evalsHealth(store)) }
+      const evaluateDue = () => {
+        engine.evaluateDue(); evals.set(evalsHealth(store))
+        if (this.closing() || this.paused() || !setup.configured()) return
+        const master = ctx.agents.get(masterId as SessionId)
+        if (master?.status === 'running' || master?.inbox.nextStep.length || master?.inbox.nextTurn.length
+          || effects.pending('assessment') || effects.pending('relay') || effects.pending('notice')
+          || effects.pending('reply') || effects.pending('launch') || effects.pending('delivery')) return
+        const context = runtime.context({ kind: 'dingtalk', health: [] })
+        for (const card of pendingCardReplies(context)) {
+          if (card.reply_reminded) continue
+          const ticket = card.ticket_id ? store.tickets.get(card.ticket_id) : undefined
+          const worker = card.ticket_id ? ctx.agents.get(workerSessionId(card.ticket_id) as SessionId) : undefined
+          if (worker?.status === 'running' || worker?.inbox.nextStep.length || worker?.inbox.nextTurn.length
+            || ticket?.undelivered.length) continue
+          store.atomic(() => {
+            if (!remindCardReply(context, card.card_id)) return
+            sessions.relay(`card-reply-required:${card.card_id}`, JSON.stringify({ kind: 'card_reply_required', ...card,
+              note: 'This card still requires an explicit final reply. Check the disposition or worker handoff, then reply on this exact card. Ignored, duplicate and no-action outcomes must be stated explicitly. Do not invent completion or send a duplicate ticket result.' }))
+          })
+        }
+      }
       const passes = this.passes = new Passes({ engine: { receive: trigger => engine.receive(trigger), evaluateDue }, effects,
         health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing() })
       this.sourceDeps = { store, engine, outbox, commands, sources, get ready() { return runtime.ready },
         get deployment() { return setup.deployment }, configured: () => setup.configured(),
         get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => {
+          // PR CI is not monitored or dispatched. Only main/default-branch CI and scheduled runs are monitored.
+          if (trigger.source === 'github' && trigger.meta.ci === true && trigger.meta.isPr === true) return 'filtered'
           // Unaddressed PR discussion belongs only to a task explicitly bound to that PR.
           if (trigger.source === 'github' && !trigger.addressed
-            && (['conversation', 'inline', 'review'].includes(String(trigger.meta.kind))
-              || trigger.meta.ci === true && trigger.meta.isPr === true)) {
+            && ['conversation', 'inline', 'review'].includes(String(trigger.meta.kind))) {
             const thread = store.threads.get(`github:${trigger.meta.number}`)
             const bound = trigger.meta.isPr === true && thread?.subscriptions.some(id => {
               const ticket = store.tickets.get(id)
@@ -191,6 +216,14 @@ export class Runtime extends Service implements SourceHost {
           })
         } }
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
+        cardReplies: {
+          pending: ticketId => pendingCardReplies(runtime.context({ kind: 'dingtalk', health: [] }), ticketId),
+          reply: (id, text, ticketId) => {
+            const reply = replyToCard(runtime.context({ kind: 'dingtalk', health: [] }), id, text, ticketId)
+            passes.request()
+            return reply
+          },
+        },
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
         quietly: run => { this.quiet++; try { return run() } finally { this.quiet-- } } }

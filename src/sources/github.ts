@@ -5,7 +5,7 @@ import { sameName } from '../infra/text.ts'
 import { GithubAccountsSchema } from '../deployment.ts'
 import { CliError, validItems, type Tally } from '../infra/commands.ts'
 import { ciCounts, ciFact, ciFailures, ciSummary, githubThreadContext, pullChecks } from './github-read.ts'
-import { branchCiTrigger, ciTrigger, commentTrigger, CommentSchema, githubAddress, issueTrigger, IssueSchema, pullTrigger, SOURCE }
+import { branchCiTrigger, commentTrigger, CommentSchema, githubAddress, issueTrigger, IssueSchema, pullTrigger, SOURCE }
   from './github-trigger.ts'
 import { githubLink, sendGithub } from './github-channel.ts'
 import type { GithubComment, PullRef } from './github-trigger.ts'
@@ -274,7 +274,7 @@ async function readStream(ctx: SourceContext, round: Round, id: string, path: st
   // The ETag belongs to this request, which the next round repeats only while the cursor stays unchanged.
   ctx.state.set(name, { since: next, started, ...etag && next === since ? { etag } : {} })
 }
-/** Reuses branch CI snapshots: main for App mode, default branch for users; App mode also reports a startup failure. */
+/** Report a stable completed branch CI snapshot once per head/execution; never report partial results. */
 async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
   const commands = ctx.commands.withSignal(round.signal)
   const app = ctx.deployment.github.auth === 'app'
@@ -282,25 +282,29 @@ async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
   const head = await commands.api(z.looseObject({ sha: z.string() }), `commits/${encodeURIComponent(branch)}`)
   const snapshot = await pullChecks(commands, head.sha, round.tally)
   const previous = ctx.state.get(KV.github.branchCi)
-  // The first observation after switching on or renaming the default branch establishes the baseline.
-  const known = previous?.branch === branch ? previous.failures : undefined
   const failures = ciFailures(snapshot)
   const counts = ciCounts(snapshot)
-  // CI is observed by the service, never by a waiting worker. Ignore partial results.
-  if (counts.running || !snapshot.checks.length && !snapshot.statuses.length) return
-  const now = failures
+  const fingerprint = key(JSON.stringify(snapshot))
+  const sameBranch = previous?.branch === branch
   let revision = previous?.revision ?? 0
-  if (known ? JSON.stringify(now) !== JSON.stringify(known) : app && counts.failed > 0) {
+  let reported = sameBranch ? previous?.reported : undefined
+  if (counts.running || !snapshot.checks.length && !snapshot.statuses.length
+    || snapshot.checks.some(check => check.conclusion === null)) {
+    ctx.state.set(KV.github.branchCi, { branch, failures: sameBranch ? previous?.failures : undefined, revision, reported })
+    return
+  }
+  if (sameBranch && previous?.settled === fingerprint && reported !== fingerprint) {
     revision += 1
     const summary = ciSummary(snapshot, branch, `github/commits/${head.sha}/checks`)
     const url = `https://github.com/${ctx.deployment.repository}/commit/${head.sha}`
     await ctx.receive(branchCiTrigger(branch, head.sha, revision, summary, url))
     ctx.threads.describe(`github:ci:${branch}`, { label: `CI on ${branch}`, facts: { ci: ciFact(counts) } })
+    reported = fingerprint
   }
-  ctx.state.set(KV.github.branchCi, { branch, failures: now, revision })
+  ctx.state.set(KV.github.branchCi, { branch, failures, revision, settled: fingerprint, reported })
 }
 /**
- * One polling round: notifications, then observed repository streams, then the PRs of open tickets with their CI, then
+ * One polling round: notifications, then observed repository streams, then lifecycle state of ticket PRs, then
  * subscribed Threads. Each step and each Issue, PR, or Thread fails independently so all steps run before the round fails.
  * Other read failures (including 404) fail the round toward the error threshold, whereas deleted (410) or abandoned
  * (24h+) threads are recorded only on the thread and in health detail.
@@ -436,34 +440,9 @@ export async function pollTicketPulls(ctx: SourceContext, signal?: AbortSignal, 
   for (const number of numbers) {
     if (stopped(ctx, round)) return
     try {
-      const pr = await pull(ctx, round, number)
-      if (pr.state !== 'closed' && !pr.merged) await pollChecks(ctx, round, number, pr)
+      await pull(ctx, round, number)
     } catch (error) { if (!stopped(ctx, round)) failed(ctx, round, number, error) }
   }
-}
-/** Emit a bound PR's final CI result after two matching completed observations; partial states never wake a worker. */
-async function pollChecks(ctx: SourceContext, round: Round, number: number, pr: Pull): Promise<void> {
-  const snapshot = await pullChecks(ctx.commands.withSignal(round.signal), pr.head.sha, round.tally)
-  const fingerprint = key(JSON.stringify(snapshot))
-  const previous = ctx.state.get(KV.github.ci(number))
-  const counts = ciCounts(snapshot)
-  const complete = snapshot.checks.length + snapshot.statuses.length > 0 && !counts.running
-    && snapshot.checks.every(check => check.conclusion !== null)
-  let revision = previous?.revision ?? 0
-  if (!complete) {
-    // Seeing a new execution in progress permits another final report, even for a rerun of the same SHA.
-    ctx.state.set(KV.github.ci(number), { fingerprint, revision })
-    return
-  }
-  const stable = previous?.settled === fingerprint
-  let reported = previous?.reported
-  if (stable && reported !== fingerprint) {
-    revision += 1
-    await ctx.receive(ciTrigger(pr, revision, ciSummary(snapshot, `PR #${number}`, `github/pulls/${number}/checks`)))
-    reported = fingerprint
-  }
-  ctx.state.set(KV.github.ci(number), { fingerprint, revision, settled: fingerprint, reported })
-  ctx.threads.describe(`github:${number}`, { facts: { ci: ciFact(counts) } })
 }
 function nameThread(ctx: SourceContext, number: number, title: string): void {
   ctx.threads.patch(`github:${number}`, { title })

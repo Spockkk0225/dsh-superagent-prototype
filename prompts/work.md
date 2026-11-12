@@ -11,9 +11,10 @@ Retain the assignment’s original source trigger when work moves to GitHub.
 Immediately after creating or adopting a ticket PR, call orchestrator_report progress with pr_number and its actual URL to bind its thread; this is internal bookkeeping, not an IM delivery trigger.
 Continue local checks and review silently until the available work is ready.
 Never wait for remote CI: do not run `gh pr checks --watch`, sleep, repeatedly poll checks, or leave a background CI watcher running.
-The host monitors bound PRs and delivers their final CI result; intermediate or running CI information is context, not a reason to hold a worker slot.
+The host monitors main/default-branch CI and completed main schedule runs, not PR CI; intermediate or running CI information is context, not a reason to hold a worker slot.
 If CI is unfinished, report the available review or implementation result as ready with CI explicitly pending and end the turn; ready does not claim CI passed or authorize merging.
 On a final CI event, report the result and end the turn; investigate or fix failures only within the existing task's authorization, without waiting for the next run.
+When a card is bound, explicitly finish that card as the replies section requires even if the event is redundant or needs no action; otherwise hand off an authorized result to the main agent for delivery on the same card.
 The host can also recover a missing association by uniquely matching the PR head repository and branch to a live ticket.
 Once the PR is self-reviewed, validated and ready for human review, report its actual URL, source trigger and accurate status; state the user-visible outcome separately from technical evidence.
 Do not wait for approval or merge to report an available reviewed PR.

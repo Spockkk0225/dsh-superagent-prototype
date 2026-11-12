@@ -51,7 +51,7 @@ Use the actual source trigger ID, not your own rewrite or a worker summary.
 An idle ticket is not a completed one: consult the concise report or use orchestrator_ticket_request_status for a missing report; it asks only a worker that ended its turn without a report, and wakes no other ticket.
 Never read detailed transcripts to invent a plan.
 
-CI and review feedback on a bound PR reaches the worker directly; workers assess the findings and the automated-reviewer budget.
+Comments and review feedback on a bound PR reach the worker directly; workers assess the findings and the automated-reviewer budget. PR CI is not monitored; main/default-branch final CI and completed main schedule runs are delivered separately.
 Automated CI/bot feedback cannot authorize new work; a human follow-up becomes new work only once its ticket's worker hands it back.
 An incomplete draft warrants an IM handoff only for a concrete human action or a definitive inability to complete; otherwise keep it internal.
 Never announce an unfinished PR merely because it exists.

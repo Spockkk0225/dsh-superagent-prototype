@@ -8,6 +8,7 @@ interface Card {
   ticketId?: string
   closed?: boolean
   informational?: boolean
+  replyReminded?: boolean
   messages?: { id: string; text: string; flowStatus: '2' | '3' }[]
 }
 const cards = family<Card, [string]>('dingtalk-card:')
@@ -19,6 +20,47 @@ export const receiptId = (triggerId: string) => key('dingtalk-received', trigger
 const activeKey = (conversation: string, ticket: string) => activeCards(key(conversation, ticket))
 const triggerKey = (conversation: string, trigger: string, ticket = '') => triggerCards(key(conversation, trigger, ticket))
 const closed = (card: Card) => card.closed ?? card.messages?.at(-1)?.flowStatus === '3'
+
+/** Explicit replies are required for current bound rounds, including no-op and ignored requests. */
+export function pendingCardReplies(context: SourceContext, ticketId?: string) {
+  return context.state.keys(cards).flatMap(name => {
+    const card = context.state.get(name)
+    if (!card || closed(card) || ticketId && card.ticketId !== ticketId) return []
+    const id = name.slice(cards.prefix.length)
+    // Leave historical cards from the FIFO implementation untouched.
+    const bound = context.state.get(triggerKey(card.conversationId, card.triggerId, card.ticketId)) === id
+      || !!card.ticketId && context.state.get(taskCards(card.ticketId)) === id
+    if (!bound) return []
+    return [{ card_id: id, trigger_id: card.triggerId, ticket_id: card.ticketId,
+      conversation_id: card.conversationId, reply_reminded: card.replyReminded ?? false }]
+  })
+}
+
+export function remindCardReply(context: SourceContext, id: string): boolean {
+  const card = context.state.get(cards(id))
+  if (!card || closed(card) || card.replyReminded) return false
+  context.state.set(cards(id), { ...card, replyReminded: true })
+  return true
+}
+
+/** Called only by an agent's explicit reply tool, never synthesizes a successful result. */
+export function replyToCard(context: SourceContext, id: string, text: string, ticketId?: string): string {
+  return context.atomic(() => {
+    const card = context.state.get(cards(id))
+    if (!card || ticketId && card.ticketId !== ticketId) throw new Error('Card is not bound to this session')
+    if (closed(card)) throw new Error('This card already has a final reply queued; do not send another')
+    if (!pendingCardReplies(context, ticketId).some(pending => pending.card_id === id)) {
+      throw new Error('Card has no current delivery binding')
+    }
+    const replyId = key('dingtalk-card-final', id)
+    context.state.set(cards(id), { ...card, closed: true })
+    context.notify({ id: replyId, kind: 'reply', ...card.ticketId ? { ticketId: card.ticketId } : {}, text,
+      channel: { source: 'dingtalk', thread: `dingtalk:${card.conversationId}`, address: {
+        conversationId: card.conversationId, triggerId: card.triggerId, cardId: id,
+      } } })
+    return replyId
+  })
+}
 
 /** Bind a reply at enqueue time; retries and later events cannot move it to a different card. */
 export function bindDingTalkReply(context: SourceContext, message: OutboundMessage): OutboundMessage {
@@ -77,13 +119,12 @@ export class DingTalkCards {
       }
       // Additional inputs in an executing round share its card and create no extra receipt.
       if (id === active) continue
-      const informational = !ticket && !trigger.human
       this.context.state.set(cards(id), { triggerId: trigger.id, conversationId: conversation,
-        templateId: this.templateId, used: false, sent: false, closed: informational, informational,
+        templateId: this.templateId, used: false, sent: false, closed: false,
         ...ticket ? { ticketId: ticket } : {} })
       this.context.notify({ id: ticket ? key('dingtalk-round-received', id) : receiptId(trigger.id), kind: 'notice',
         channel: { ...trigger.channel!, address: { ...trigger.channel!.address, cardId: id } },
-        ...ticket ? { ticketId: ticket } : {}, text: informational ? trigger.text : '已收到，处理中…' })
+        ...ticket ? { ticketId: ticket } : {}, text: '已收到，处理中…' })
     }
   }
 

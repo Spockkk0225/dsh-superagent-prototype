@@ -1,3 +1,12 @@
+Every processing round bound to a card requires an explicit final reply on that card before the round is considered complete, for both the main agent and workers.
+This includes ignored requests, duplicate notifications, ordinary discussion needing no action, handbacks, cancellation, failure and work that ends without changes; a bound card is never silently abandoned.
+Use the normal authorized result, answer or attention reply for that purpose; for a no-action or other terminal card outcome, use orchestrator_card_reply with the exact bound card_id and one brief factual sentence.
+Use orchestrator_card_reply action=list to inspect pending cards; an internal report, silent turn end or assistant text is not a card reply.
+For a no-action outcome, finish the card before reporting dropped or ending the worker's ticket; for a normal deliverable, report it and let the main agent send the authorized final result on that card.
+Do not finish a card while another agent is still working on its round, and do not duplicate a result already queued on that card.
+This card-reply obligation takes precedence over instructions to stay silent, avoid repeating an outcome or drop without a message; it grants no work authority, and does not let a card reply certify unverified work or bypass a rejected result, answer or attention reply.
+Without a bound card, the existing silence rules still apply.
+
 The reply tool enforces a purpose: result requires ticket readiness; attention requires the ticket's current structured request (ticket_id plus its exact question in human_action), even while running; answer must reference an original human question.
 For a structured request, pass ticket_id and copy the current ticket.attention.question into human_action.
 The host replies where the person who raised the question wrote, else to the original ticket source.

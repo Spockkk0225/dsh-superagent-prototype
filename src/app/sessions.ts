@@ -36,6 +36,8 @@ export interface SessionsHost {
   environment(ticket: Ticket): Variable[]
   /** Tools to register on the main Session (`ticket === undefined`) or on `ticket`'s worker Session. */
   tools(agent: Agent, ticket?: Ticket): Tool[]
+  /** Current transport obligations, independent of saved team prompt overrides. */
+  cardReplyInstructions?(ticket?: Ticket): string
 }
 
 /**
@@ -244,7 +246,7 @@ export class Sessions {
         const version = this.promptFor(agent, true)
         const current = ticket && host.store.tickets.get(ticket.id)
         return `[dsh-superagent prompt revision ${version.revision}]\n${host.prompts.compose(version.config,
-          master ? 'orchestrator' : 'worker', current ? host.environment(current) : undefined)}\n${current ? mandateInstructions(current.mandate) : ''}`
+          master ? 'orchestrator' : 'worker', current ? host.environment(current) : undefined)}\n${current ? mandateInstructions(current.mandate) : ''}${host.cardReplyInstructions?.(current) ?? ''}`
       }, host.tools(agent, ticket), () => {
         const current = ticket && host.store.tickets.get(ticket.id)
         return ticket && (!current || !liveTicket(current)) ? 'Ticket ended; new work needs a new authorized ticket' : undefined
@@ -259,7 +261,7 @@ export class Sessions {
       const version = this.promptFor(agent, context.signal !== undefined)
       const current = ticket && host.store.tickets.get(ticket.id)
       const composed = host.prompts.compose(version.config, master ? 'orchestrator' : 'worker', current ? host.environment(current) : undefined)
-      return `[dsh-superagent prompt revision ${version.revision}]\n${composed}\n${current ? mandateInstructions(current.mandate) : ''}`
+      return `[dsh-superagent prompt revision ${version.revision}]\n${composed}\n${current ? mandateInstructions(current.mandate) : ''}${host.cardReplyInstructions?.(current) ?? ''}`
     }, ...(master ? { complete: true } : {}) }))
     // A recreated skill scope (e.g. after the skills service restarts) starts empty, so reset `binding.skills` before rebinding.
     const skillScope = agent.ctx.inject(['skills'], scope => {
