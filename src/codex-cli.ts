@@ -97,11 +97,15 @@ async function main(): Promise<void> {
   })()
   try {
     runtime = new Runtime(ctx, machine, () => { log('restart_required'); void stop() },
-      process.env.DINGTALK_GITHUB_NOTIFY_CONVERSATION_ID?.trim() || undefined, trigger => robot?.received(trigger))
+      process.env.DINGTALK_GITHUB_NOTIFY_CONVERSATION_ID?.trim() || undefined, trigger => robot?.received(trigger),
+      (ticketId, deliveryId, triggerId, busy) => robot?.bindWorkerDelivery(ticketId, deliveryId, triggerId, busy))
     runtime.lifetime.addEventListener('abort', () => { githubController.abort(); robot?.stop(); void harness.close() }, { once: true })
     runtime.sources.register(githubKind)
     const kind = dingTalkKind(message => robot!.send(message))
     runtime.sources.register(kind)
+    // Construct the transport before startup recovery can submit a worker delivery; connecting still waits for setup.
+    robot = new DingTalk(runtime.context(kind), { clientId, clientSecret }, log, fetch,
+      process.env.DINGTALK_CARD_TEMPLATE_ID, process.env.DINGTALK_ROBOT_NAME)
     await runtime.ready
     if (!runtime.configured()) throw new Error(`Setup: ${runtime.setupProblem?.detail ?? 'not configured'}`)
     // Export once at startup, then keep using the original static allowed list and gate.
@@ -112,8 +116,6 @@ async function main(): Promise<void> {
     const policy = runtime.store.settings().policy
     await runtime.settings.save('policy', { ...policy, sources: { ...policy.sources,
       github: { ...policy.sources.github, allowed } } }, runtime.store.blockRevision('policy'), 'sync')
-    robot = new DingTalk(runtime.context(kind), { clientId, clientSecret }, log, fetch,
-      process.env.DINGTALK_CARD_TEMPLATE_ID, process.env.DINGTALK_ROBOT_NAME)
     await harness.listen()
     await robot.start()
     githubPolling = watchGithub(runtime.context(githubKind), githubController.signal)

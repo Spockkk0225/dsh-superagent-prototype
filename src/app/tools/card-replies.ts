@@ -1,11 +1,13 @@
 /** Shared explicit completion replies for cards, independent of ticket readiness or human-only acknowledgement gates. */
 import { z } from 'zod'
 import { AcknowledgementSchema, tool, type Tool } from './tool.ts'
+import type { ChannelRef } from '../../core/index.ts'
 
 export interface CardReplies {
   pending(ticketId?: string): { card_id: string; trigger_id: string; ticket_id?: string }[]
   acknowledge(cardId: string, text: string, ticketId?: string): string
   reply(cardId: string, text: string, ticketId?: string): string
+  resolve(cardId: string, ticketId?: string): { ticket_id?: string; channel: ChannelRef }
 }
 
 export function cardReplyTools(host: { cardReplies?: CardReplies; sendReplies(): Promise<void> }, ticketId?: string): Tool[] {

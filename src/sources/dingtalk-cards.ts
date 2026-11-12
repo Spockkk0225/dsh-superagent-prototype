@@ -11,6 +11,8 @@ interface Card {
   informational?: boolean
   replyReminded?: boolean
   acknowledgementId?: string
+  awaitingWorker?: boolean
+  deliveryId?: string
   githubMentions?: string[]
   githubMirrorSuppressed?: boolean
   messages?: { id: string; text: string; flowStatus: '2' | '3' }[]
@@ -20,11 +22,40 @@ const deliveries = family<string, [string]>('dingtalk-card-delivery:')
 const activeCards = family<string, [string]>('dingtalk-card-active:')
 const triggerCards = family<string, [string]>('dingtalk-card-trigger:')
 const taskCards = family<string, [string]>('dingtalk-card-task:')
+const workerDeliveries = family<string, [string, string]>('dingtalk-card-worker-delivery:')
 export const receiptId = (triggerId: string) => key('dingtalk-received', triggerId)
 const activeKey = (conversation: string, ticket: string) => activeCards(key(conversation, ticket))
 const triggerKey = (conversation: string, trigger: string, ticket = '') => triggerCards(key(conversation, trigger, ticket))
 const closed = (card: Card) => card.closed ?? card.messages?.at(-1)?.flowStatus === '3'
 const acknowledged = (card: Card) => !!card.acknowledgementId || !!card.messages?.some(message => message.flowStatus === '2')
+
+export function workerReplyCard(context: SourceContext, ticketId: string) {
+  const id = context.state.get(taskCards(ticketId))
+  return id ? { card_id: id, ticket_id: ticketId } : undefined
+}
+
+/** Resolve an explicit reply destination without changing a newer round's active binding. */
+export function resolveCardReply(context: SourceContext, id: string, ticketId?: string) {
+  const card = context.state.get(cards(id))
+  if (!card || ticketId && card.ticketId !== ticketId) throw new Error('Card is not bound to this task')
+  if (!pendingCardReplies(context, ticketId).some(pending => pending.card_id === id)) {
+    throw new Error('This card has no open processing round; do not send another final reply')
+  }
+  return { ticket_id: card.ticketId, channel: { source: 'dingtalk', thread: `dingtalk:${card.conversationId}`,
+    address: { conversationId: card.conversationId, triggerId: card.triggerId, cardId: id } } }
+}
+
+/** Confirmation identity follows a card/round, never a source trigger shared by several workers. */
+export function cardAcknowledgementId(context: SourceContext, ticketId: string, trigger: Trigger): string | undefined {
+  if (trigger.channel?.source !== 'dingtalk') return undefined
+  const conversation = trigger.channel.address.conversationId!
+  const id = trigger.channel.address.cardId ?? context.state.get(triggerKey(conversation, trigger.id, ticketId))
+    ?? context.state.get(triggerKey(conversation, trigger.id))
+  const card = id ? context.state.get(cards(id)) : undefined
+  if (!card || card.ticketId && card.ticketId !== ticketId) return undefined
+  return card.acknowledgementId ?? card.messages?.find(message => message.flowStatus === '2')?.id
+    ?? key('dingtalk-card-ack', id!)
+}
 
 /** Explicit confirmation/results for GitHub mentions are delivered to GitHub as well as the bound IM channel. */
 export function githubMentionReplies(context: SourceContext, message: OutboundMessage): OutboundMessage[] {
@@ -60,6 +91,7 @@ export function pendingCardReplies(context: SourceContext, ticketId?: string) {
     // Leave historical cards from the FIFO implementation untouched.
     const bound = context.state.get(triggerKey(card.conversationId, card.triggerId, card.ticketId)) === id
       || !!card.ticketId && context.state.get(taskCards(card.ticketId)) === id
+      || !!card.ticketId && !!card.deliveryId && context.state.get(workerDeliveries(card.ticketId, card.deliveryId)) === id
     if (!bound) return []
     return [{ card_id: id, trigger_id: card.triggerId, ticket_id: card.ticketId,
       conversation_id: card.conversationId, initial_confirmation_required: !acknowledged(card),
@@ -117,7 +149,19 @@ export function replyToCard(context: SourceContext, id: string, text: string, ti
 
 /** Bind a reply at enqueue time; retries and later events cannot move it to a different card. */
 export function bindDingTalkReply(context: SourceContext, message: OutboundMessage): OutboundMessage {
-  if (message.channel.source !== 'dingtalk' || message.channel.address.cardId) return message
+  if (message.channel.source !== 'dingtalk') return message
+  if (message.channel.address.cardId) {
+    const id = message.channel.address.cardId
+    const card = context.state.get(cards(id))
+    if (!card || card.ticketId && message.ticketId && card.ticketId !== message.ticketId) throw new Error('Card is not bound to this reply')
+    if (message.kind === 'acknowledgement' && !acknowledged(card)) card.acknowledgementId = message.id
+    if (message.kind === 'reply') {
+      if (!acknowledged(card)) throw new Error('Send the initial card confirmation with action=acknowledge before the final reply')
+      card.closed = true
+    }
+    context.state.set(cards(id), card)
+    return message
+  }
   const conversation = message.channel.address.conversationId!
   const trigger = message.channel.address.triggerId
     ?? (message.ticketId ? context.tickets.get(message.ticketId)?.origin.triggerId : undefined)
@@ -138,6 +182,7 @@ export function bindDingTalkReply(context: SourceContext, message: OutboundMessa
   const card = context.state.get(cards(id)) ?? { triggerId: trigger, conversationId: conversation,
     templateId: '', used: false, sent: false }
   if (message.ticketId) {
+    if (!card.ticketId) card.awaitingWorker = true
     card.ticketId = message.ticketId
     context.state.set(activeKey(card.conversationId, message.ticketId), id)
     context.state.set(taskCards(message.ticketId), id)
@@ -162,34 +207,52 @@ export class DingTalkCards {
   received(trigger: Trigger): void {
     const conversation = trigger.channel!.address.conversationId!
     const targets = this.context.triggers.targets?.(trigger.id) ?? []
-    for (const ticket of targets.length ? targets : [undefined]) {
-      const binding = triggerKey(conversation, trigger.id, ticket)
-      if (this.context.state.get(binding)) continue
-      const active = ticket ? this.context.state.get(activeKey(conversation, ticket)) : undefined
-      const previous = active ? this.context.state.get(cards(active)) : undefined
-      const id = previous && !closed(previous) ? active!
-        : ticket ? key('dingtalk-round', conversation, ticket, trigger.id) : receiptId(trigger.id)
-      this.context.state.set(binding, id)
-      if (ticket) {
-        this.context.state.set(activeKey(conversation, ticket), id)
-        this.context.state.set(taskCards(ticket), id)
-      }
-      const githubMention = trigger.source === 'github' && trigger.human && !!trigger.addressed
-      // Additional inputs in an executing round share its card and create no extra receipt.
-      if (id === active) {
-        if (githubMention || trigger.source !== 'github') this.context.state.set(cards(id), { ...previous!,
-          ...githubMention ? { githubMentions: [...new Set([...previous?.githubMentions ?? [], trigger.id])] } : {},
-          ...trigger.source !== 'github' ? { githubMirrorSuppressed: true } : {} })
-        continue
-      }
-      this.context.state.set(cards(id), { triggerId: trigger.id, conversationId: conversation,
-        templateId: this.templateId, used: false, sent: false, closed: false,
-        ...githubMention ? { githubMentions: [trigger.id] } : {},
-        ...ticket ? { ticketId: ticket } : {} })
-      this.context.notify({ id: ticket ? key('dingtalk-round-received', id) : receiptId(trigger.id), kind: 'notice',
-        channel: { ...trigger.channel!, address: { ...trigger.channel!.address, cardId: id } },
-        ...ticket ? { ticketId: ticket } : {}, text: '已收到，处理中…' })
-    }
+    // Worker cards are allocated at actual delivery, when its busy/idle state is known.
+    if (targets.length) return
+    const binding = triggerKey(conversation, trigger.id)
+    if (this.context.state.get(binding)) return
+    const id = receiptId(trigger.id)
+    this.context.state.set(binding, id)
+    this.context.state.set(cards(id), { triggerId: trigger.id, conversationId: conversation,
+      templateId: this.templateId, used: false, sent: false, closed: false,
+      ...trigger.source === 'github' && trigger.human && trigger.addressed ? { githubMentions: [trigger.id] } : {} })
+    this.context.notify({ id, kind: 'notice',
+      channel: { ...trigger.channel!, address: { ...trigger.channel!.address, cardId: id } }, text: '已收到，处理中…' })
+  }
+
+  /** Called synchronously immediately before a worker message is submitted; every delivery has an immutable card binding. */
+  delivery(ticketId: string, deliveryId: string, triggerId: string, busy: boolean) {
+    return this.context.atomic(() => {
+      const saved = this.context.state.get(workerDeliveries(ticketId, deliveryId))
+      if (saved) return { card_id: saved, ticket_id: ticketId }
+      const trigger = this.context.triggers.get(triggerId)
+      if (trigger?.channel?.source !== 'dingtalk') return undefined
+      const conversation = trigger.channel.address.conversationId!
+      const active = this.context.state.get(activeKey(conversation, ticketId))
+      const current = active ? this.context.state.get(cards(active)) : undefined
+      const provisional = this.context.state.get(triggerKey(conversation, triggerId))
+      const waiting = provisional ? this.context.state.get(cards(provisional)) : undefined
+      const adopt = waiting && !closed(waiting) && (!waiting.ticketId || waiting.ticketId === ticketId && waiting.awaitingWorker)
+      const id = busy && current && !closed(current) ? active!
+        : adopt ? provisional! : key('dingtalk-worker-round', conversation, ticketId, deliveryId)
+      const existing = this.context.state.get(cards(id))
+      const card: Card = existing ?? { triggerId, conversationId: conversation, templateId: this.templateId,
+        used: false, sent: false, closed: false }
+      card.ticketId = ticketId
+      card.awaitingWorker = false
+      card.deliveryId ??= deliveryId
+      if (trigger.source === 'github' && trigger.human && trigger.addressed) {
+        card.githubMentions = [...new Set([...card.githubMentions ?? [], triggerId])]
+      } else if (trigger.source !== 'github' && existing) card.githubMirrorSuppressed = true
+      this.context.state.set(cards(id), card)
+      this.context.state.set(workerDeliveries(ticketId, deliveryId), id)
+      this.context.state.set(triggerKey(conversation, triggerId, ticketId), id)
+      this.context.state.set(activeKey(conversation, ticketId), id)
+      this.context.state.set(taskCards(ticketId), id)
+      if (!existing) this.context.notify({ id: key('dingtalk-round-received', id), kind: 'notice', ticketId,
+        channel: { ...trigger.channel, address: { ...trigger.channel.address, cardId: id } }, text: '已收到，处理中…' })
+      return { card_id: id, ticket_id: ticketId }
+    })
   }
 
   async send(message: OutboundMessage): Promise<void> {

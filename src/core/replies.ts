@@ -13,7 +13,8 @@ import { EnginePart } from './part.ts'
  */
 export type ReplyRequest =
   | { purpose: 'acknowledgement'; ticketId: string; triggerId: string; text: string }
-  | { purpose: 'answer' | 'result' | 'attention'; ticketId?: string; triggerId?: string; question?: string; text: string }
+  | { purpose: 'answer' | 'result' | 'attention'; ticketId?: string; triggerId?: string; question?: string; text: string;
+      /** A transport binding validated by the host; normal purpose/readiness checks still apply. */ channel?: ChannelRef }
 /** A queued message: its id, whether it went out, and whether an earlier request had queued it already. */
 export interface Reply { id: string; status: ReplyStatus; reused: boolean }
 
@@ -41,7 +42,9 @@ export class Replies extends EnginePart {
    * and a person wrote it.
    */
   acknowledgeAccepted(ticketId: string, trigger: Trigger, text: string): void {
-    if (trigger.channel && trigger.human) this.options.outbox.send({ id: key('ack', trigger.id), channel: trigger.channel, text, kind: 'acknowledgement', ticketId })
+    if (trigger.channel && trigger.human) this.options.outbox.send({
+      id: this.options.outbox.acknowledgementId?.(ticketId, trigger) ?? key('ack', trigger.id),
+      channel: trigger.channel, text, kind: 'acknowledgement', ticketId })
   }
   /** Withdraw a ticket's question for a person from the outbox, unless it went out already. */
   withdrawAttention(attentionId: string): void { this.options.outbox.withdraw(key('attention-reply', attentionId)) }
@@ -53,7 +56,7 @@ export class Replies extends EnginePart {
     // Context-only threads are read-only and cannot receive acknowledgements.
     if (!this.reaches(ticket, trigger, false)) throw new UserError('notReached')
     if (!trigger.channel) throw new UserError('ackNoChannel')
-    const id = key('ack', trigger.id)
+    const id = this.options.outbox.acknowledgementId?.(ticket.id, trigger) ?? key('ack', trigger.id)
     const existing = this.options.outbox.status(id)
     if (!existing && !trigger.human) throw new UserError('ackNotPerson')
     // Preserve the automatic or first queued acknowledgement.
@@ -76,12 +79,14 @@ export class Replies extends EnginePart {
     // Attention replies must match the ticket's currently open question text.
     if (request.purpose === 'attention' && (!attention || attention.question !== request.question)) throw new UserError('notAttention')
     if (request.purpose === 'answer' && !trigger?.human) throw new UserError('notQuestion')
-    const id = attention ? key('attention-reply', attention.id) : key('reply', trigger?.id ?? ticket?.id ?? '', request.text)
+    const id = attention ? key('attention-reply', attention.id) : request.channel
+      ? key('bound-reply', request.channel.source, JSON.stringify(request.channel.address), trigger?.id ?? ticket?.id ?? '', request.text)
+      : key('reply', trigger?.id ?? ticket?.id ?? '', request.text)
     const existing = this.options.outbox.status(id)
     const ready = !ticket || !trigger || ticket.answers?.includes(trigger.id)
     if (request.purpose === 'answer' && !ready && !existing) throw new UserError('noAnswer')
     const asker = attention?.triggerId ? this.repo.triggers.get(attention.triggerId) : undefined
-    const channel = request.purpose === 'answer' ? trigger!.channel : asker?.channel ?? (ticket ? this.sourceChannel(ticket) : undefined)
+    const channel = request.channel ?? (request.purpose === 'answer' ? trigger!.channel : asker?.channel ?? (ticket ? this.sourceChannel(ticket) : undefined))
     if (!channel) throw new UserError('noChannel')
     this.options.outbox.send({ id, channel, text: request.text, kind: 'reply', ...ticket ? { ticketId: ticket.id } : {} })
     if (request.purpose === 'answer' && ticket && trigger && ticket.answers?.includes(trigger.id)) {

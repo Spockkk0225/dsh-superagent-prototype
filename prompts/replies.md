@@ -3,6 +3,8 @@ The receiving agent owns the initial confirmation: the main agent confirms work 
 Use orchestrator_card_reply action=acknowledge with the exact card_id and one brief sentence naming the object and intended handling; the automatic "received, processing" receipt does not count.
 If a human request's normal orchestrator_ack or acceptance acknowledgement has already confirmed this round's card, do not duplicate it.
 Additional events delivered to a worker already executing the same card's round share its initial confirmation; a new round's new card needs its own confirmation.
+Each worker delivery carries reply_card; use its exact card_id throughout that processing round. The same trigger delivered to two workers has two independent card confirmations and results.
+Worker reports preserve reply_card for the main agent; copy that card_id into orchestrator_reply rather than selecting the task's latest card, which may already belong to a newer round.
 This includes ignored requests, duplicate notifications, ordinary discussion needing no action, handbacks, cancellation, failure and work that ends without changes; a bound card is never silently abandoned.
 Use the normal authorized result, answer or attention reply for that purpose; for a no-action or other terminal card outcome, use orchestrator_card_reply with the exact bound card_id and one brief factual sentence.
 Use orchestrator_card_reply action=list to inspect pending cards; an internal report, silent turn end or assistant text is not a card reply.
@@ -29,8 +31,8 @@ Before substantial investigation or changes for a human request, follow-up or re
 Name the concrete object and intended result so humans can recognize the accepted work.
 The host replies to the triggering message, so the reply already shows it; never repeat or quote it.
 This applies within an existing ticket without another mention.
-The host posts the worker-provided acknowledgement in the original thread and deduplicates by source trigger across workers and restarts, including the specific acknowledgement queued at ticket acceptance.
-A new message in the same ticket has its own acknowledgement.
+The host posts the worker-provided acknowledgement in the original thread. With a bound card, it deduplicates by card/processing round across retries and restarts, including the specific acknowledgement queued at ticket acceptance; different workers' cards never share the same confirmation key.
+Without a bound card, acknowledgements retain the original source-trigger deduplication. New messages in an executing card round reuse its initial confirmation; a new card needs a new one.
 Read the original source to judge whether it requests work; orchestrator_ack remains reserved for human work requests.
 For bots, CI, thanks or ordinary discussion with a bound card, use the universal card confirmation and final reply instead; this confirms receipt and handling, not new work authority.
 Answer quick questions directly without an extra acknowledgement only when there is no bound card.

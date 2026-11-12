@@ -1,5 +1,5 @@
 /** Reliable outbound message delivery backed by persistent receipts and retried reply effects. */
-import type { OutboundMessage, Outbox as OutboxPort, ReplyStatus } from '../core/index.ts'
+import type { OutboundMessage, Outbox as OutboxPort, ReplyStatus, Trigger } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
 import { checkedImText } from '../infra/text.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
@@ -16,6 +16,7 @@ export interface OutboxHost {
   prepare?(message: OutboundMessage): OutboundMessage
   /** Additional destinations for the same explicit reply, persisted atomically with independent retry receipts. */
   mirrors?(message: OutboundMessage): OutboundMessage[]
+  acknowledgementId?(ticketId: string, trigger: Trigger): string | undefined
 }
 
 /**
@@ -44,6 +45,7 @@ export class Outbox implements OutboxPort {
     })
   }
   status(id: string): ReplyStatus | undefined { return this.host.store.receipts.get(id)?.status }
+  acknowledgementId(ticketId: string, trigger: Trigger): string | undefined { return this.host.acknowledgementId?.(ticketId, trigger) }
   withdraw(id: string): void {
     const { store, effects } = this.host
     store.atomic(() => {

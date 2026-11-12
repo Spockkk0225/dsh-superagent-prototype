@@ -146,6 +146,9 @@ export class DingTalk {
   }
   /** Use the same receipt card for native messages and externally bound event requests. */
   received(trigger: Trigger): void { this.cards?.received(trigger) }
+  bindWorkerDelivery(ticketId: string, deliveryId: string, triggerId: string, busy: boolean) {
+    return this.cards?.delivery(ticketId, deliveryId, triggerId, busy)
+  }
   async start(): Promise<void> {
     await this.client.connect()
     if (!this.client.connected) { this.client.disconnect(); throw new Error('DingTalk Stream did not connect') }

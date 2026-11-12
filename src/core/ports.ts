@@ -74,6 +74,8 @@ export interface OutboundMessage { id: string; channel: ChannelRef; text: string
 export type ReplyStatus = 'pending' | 'sent' | 'dropped'
 /** The messages queued for Channels; the Engine queues them inside its commands, and a sender delivers them later. */
 export interface Outbox {
+  /** Transport-specific acknowledgement scope, such as a worker round's bound card. */
+  acknowledgementId?(ticketId: string, trigger: Trigger): string | undefined
   /** Queue a message idempotently; an id queued before keeps its first message. */
   send(message: OutboundMessage): void
   /** Whether a message was queued, and what became of it. */

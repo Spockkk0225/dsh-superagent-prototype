@@ -38,6 +38,10 @@ export interface SessionsHost {
   tools(agent: Agent, ticket?: Ticket): Tool[]
   /** Current transport obligations, independent of saved team prompt overrides. */
   cardReplyInstructions?(ticket?: Ticket): string
+  /** Bind an external worker delivery to its processing-round card before submitting the message. */
+  bindWorkerDelivery?(ticket: Ticket, requestId: string, text: string, busy: boolean): string
+  /** Capture the worker's current round in a durable report relay before another round can start. */
+  replyCard?(ticketId: string): { card_id: string; ticket_id?: string } | undefined
 }
 
 /**
@@ -165,12 +169,32 @@ export class Sessions {
     accepted?: () => void): Promise<void> {
     const result = await this.ctx.sessionController.resolveAgent(sessionId as SessionId)
     if ('error' in result) throw result.error
+    const ticketId = ticketOfSession(sessionId)
+    const ticket = ticketId ? this.host.store.tickets.get(ticketId) : undefined
+    if (ticket && typeof mode !== 'object' && this.host.bindWorkerDelivery
+      && !await this.agentDelivery.holds(result.agent, key(requestId))) {
+      authorize?.()
+      const agent = result.agent
+      const busy = agent.status === 'running' || agent.inbox.nextStep.length > 0 || agent.inbox.nextTurn.length > 0
+      text = this.host.bindWorkerDelivery(ticket, requestId, text, busy)
+    }
     await this.agentDelivery.send(result.agent, key(requestId), text, mode, this.host.lifetime, authorize, accepted)
   }
   /** The id of the message `prompt` delivers under `requestId`, which DSH's inbox events name it by. */
   promptedId(requestId: string): MessageId { return messageId(key(requestId)) }
   /** Enqueues a steering relay to the main Session; relays are durable and retried by `Effects` until delivered, at most once per `requestId`. */
-  relay(requestId: string, text: string): void { this.host.effects.enqueue('relay', requestId, { text }) }
+  relay(requestId: string, text: string): void {
+    if (this.host.replyCard) {
+      try {
+        const message = JSON.parse(text)
+        if (['worker_report', 'worker_attention'].includes(message.kind) && message.ticket?.ticket_id) {
+          const card = this.host.replyCard(message.ticket.ticket_id)
+          if (card) text = JSON.stringify({ ...message, reply_card: card })
+        }
+      } catch { /* Non-JSON relays have no worker-card association. */ }
+    }
+    this.host.effects.enqueue('relay', requestId, { text })
+  }
   /** Enqueues a durable background notice for injection into the main Session; a new notice with the same `name` replaces a still-waiting notice of that `name`. */
   notify(name: string, value: Record<string, unknown>, summary: string): void { this.host.effects.enqueue('notice', name, { value, summary }) }
   /** Waits for currently runnable `notice` effects to settle and returns `'injected'` if notice `name` has reached the main Session or `'pending'` if it is still queued. */

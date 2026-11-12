@@ -402,6 +402,11 @@ export class DshExecutor implements Executor {
   }
   /** Number of open tickets whose worker holds a worker slot: its turn runs, or its shell jobs or subagents still run after its turn ended. */
   activeCount(): number { return this.host.store.tickets.open().filter(ticket => this.running(ticket)).length }
+  /** Includes background work that still holds this worker's slot after its model turn goes idle. */
+  busy(ticketId: string): boolean {
+    const ticket = this.host.store.tickets.get(ticketId)
+    return !!ticket && this.running(ticket)
+  }
   /** Whether a ticket's worker holds a worker slot: its turn runs, or its shell jobs or subagents do after its turn ended. */
   private running(ticket: Ticket): boolean {
     if (!runningAssignment(ticket)) return false
