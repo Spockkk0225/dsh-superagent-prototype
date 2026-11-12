@@ -240,13 +240,13 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
           const pending = host.cardReplies.pending(args.ticket_id).filter(card => args.ticket_id
             || args.trigger_id && card.trigger_id === args.trigger_id)
           if (pending.length > 1) throw new Error('Multiple card rounds exist; copy card_id from the worker report reply_card')
-          cardId = pending[0]?.card_id
+          cardId = pending[0]?.card_id ?? (args.ticket_id && args.purpose === 'result' ? host.cardReplies.current(args.ticket_id) : undefined)
         }
         if (cardId && !host.cardReplies) throw new Error('Card replies are unavailable')
         const binding = cardId ? host.cardReplies!.resolve(cardId, args.ticket_id) : undefined
         const ticketId = args.ticket_id ?? binding?.ticket_id
         const reply = host.engine.reply({ purpose: args.purpose, text: args.text, ...(args.trigger_id ? { triggerId: args.trigger_id } : {}),
-          ...(ticketId ? { ticketId } : {}), ...(binding ? { channel: binding.channel } : {}),
+          ...(ticketId ? { ticketId } : {}), ...(binding ? { channel: binding.channel, existingOnly: binding.closed } : {}),
           ...(args.human_action ? { question: args.human_action } : {}) })
         await host.sendReplies()
         return { status: host.store.replyStatus(reply.id) ?? reply.status }

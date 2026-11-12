@@ -15,7 +15,7 @@ import { KV } from '../kv.ts'
 import { cursorAt, pause, POLL_HORIZON_MS, pollThreads as pollEach } from './poll.ts'
 import type { Localized, SourceKind } from './kind.ts'
 import { z } from 'zod'
-import { pollRequests, pollScheduledCi } from './github-events.ts'
+import { pollRequests } from './github-events.ts'
 
 export { commentTrigger, type GithubComment } from './github-trigger.ts'
 /** A notification of the agent account; `subject.url` is the API address of its Issue or PR. */
@@ -207,10 +207,6 @@ async function pollRepository(ctx: SourceContext, round: Round): Promise<void> {
   }
   try { await pollBranchCi(ctx, round) }
   catch (error) { if (!stopped(ctx, round)) round.failures.push(`default branch CI: ${String(error)}`) }
-  if (ctx.deployment.github.auth === 'app' && !stopped(ctx, round)) {
-    try { await pollScheduledCi(ctx, 'main', round.started, round.signal) }
-    catch (error) { if (!stopped(ctx, round)) round.failures.push(`scheduled CI: ${String(error)}`) }
-  }
 }
 /**
  * Polls one repository-wide event stream (oldest first) since its cursor and steps the cursor to five seconds before the
@@ -297,7 +293,7 @@ async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
     revision += 1
     const summary = ciSummary(snapshot, branch, `github/commits/${head.sha}/checks`)
     const url = `https://github.com/${ctx.deployment.repository}/commit/${head.sha}`
-    await ctx.receive(branchCiTrigger(branch, head.sha, revision, summary, url))
+    await ctx.receive(branchCiTrigger(branch, head.sha, revision, summary, url, counts.failed))
     ctx.threads.describe(`github:ci:${branch}`, { label: `CI on ${branch}`, facts: { ci: ciFact(counts) } })
     reported = fingerprint
   }

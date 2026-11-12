@@ -28,6 +28,8 @@ export interface Trigger {
   actor: ActorRef
   /** Source-declared: the event was written by a person rather than a bot, CI, or this agent. */
   human: boolean
+  /** Local work order created by an event adapter. Its scope is authored by the deployment, independently of the source payload. */
+  taskRequest?: { title: string; scope: string; name: string; acknowledgement: string; replyInstructions?: string }
   /** Source-declared: the sender addressed the agent, by mentioning it or in a direct message to it. */
   addressed?: 'mention' | 'direct'
   at: string

@@ -44,7 +44,6 @@ export const KV = {
    * counts reported CI changes so each produces a distinct Trigger ID).
    */
   github: { since: record<string>('github-since'), retries: record<Record<string, Retry>>('github-retry'),
-    scheduledSince: family<string, [branch: string]>('github-scheduled-since:'),
     cursor: family<string, [number: number]>('github-cursor:'),
     stream: family<{ since: string; started: Record<string, string>; etag?: string }, [stream: string]>('github-stream:'),
     branchCi: record<{ branch?: string; failures?: string[]; revision: number; settled?: string; reported?: string }>('github-branch-ci'),

@@ -95,10 +95,10 @@ export function pullTrigger(pull: Opened, agent: string): Trigger {
   return { ...issueTrigger(pull, agent), meta: { number: pull.number, isPr: true, prAuthor: pull.user.login, kind: 'pull' } }
 }
 /** Builds a trigger for a default-branch CI transition; default-branch CI has no person to reply to, so it has no `channel`. */
-export function branchCiTrigger(branch: string, sha: string, revision: number, summary: string, url: string): Trigger {
+export function branchCiTrigger(branch: string, sha: string, revision: number, summary: string, url: string, failed: number): Trigger {
   return { id: key('github-ci', `branch:${branch}`, String(revision)), source: SOURCE,
     threads: [{ source: SOURCE, id: `ci:${branch}` }], actor: { source: SOURCE, id: '' }, human: false, at: new Date().toISOString(),
-    text: summary, url, meta: { ci: true, branch, sha, revision } }
+    text: summary, url, meta: { ci: true, branch, sha, revision, failed } }
 }
 export function ciTrigger(pr: { number: number; html_url: string; user: { login: string } }, revision: number, summary: string): Trigger {
   return { id: key('github-ci', String(pr.number), String(revision)), source: SOURCE, threads: [{ source: SOURCE, id: String(pr.number) }],

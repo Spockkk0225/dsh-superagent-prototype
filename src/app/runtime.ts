@@ -47,7 +47,7 @@ import { sourceContextOf, type SourceContextDeps } from './source-context.ts'
 import type { ResourceHost } from './resources.ts'
 import { mainTools, type MainToolsHost } from './tools/main.ts'
 import { executorTools, type ExecutorToolsHost } from './tools/executor.ts'
-import { githubEventLabel } from '../sources/github-events.ts'
+import { githubEventLabel, githubEventTask } from '../sources/github-events.ts'
 
 // Source plugins interact with dsh-superagent exclusively through the `SourceHost` service interface.
 declare module '@deepseek-ai/cordis' { interface Context { orchestrator: SourceHost } }
@@ -206,8 +206,8 @@ export class Runtime extends Service implements SourceHost {
       this.sourceDeps = { store, engine, outbox, commands, sources, get ready() { return runtime.ready },
         get deployment() { return setup.deployment }, configured: () => setup.configured(),
         get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => {
-          // PR CI is not monitored or dispatched. Only main/default-branch CI and scheduled runs are monitored.
-          if (trigger.source === 'github' && trigger.meta.ci === true && trigger.meta.isPr === true) return 'filtered'
+          if (trigger.source === 'github' && trigger.meta.ci === true &&
+            (trigger.meta.isPr === true || (notificationGroup && trigger.meta.branch !== 'main') || trigger.meta.event === 'schedule')) return 'filtered'
           // Unmentioned discussion is actionable only on a PR opened by the task (own=true).
           if (trigger.source === 'github' && !trigger.addressed
             && ['conversation', 'inline', 'review'].includes(String(trigger.meta.kind))) {
@@ -219,11 +219,16 @@ export class Runtime extends Service implements SourceHost {
             })
             if (!own) return 'filtered'
           }
-          const incoming = trigger.source === 'github' && notificationGroup ? { ...trigger,
-            channel: { source: 'dingtalk', thread: `dingtalk:${notificationGroup}`,
-              address: { conversationId: notificationGroup, triggerId: trigger.id, eventLabel: githubEventLabel(trigger) } } } : trigger
+          let incoming = trigger
+          if (trigger.source === 'github' && notificationGroup && sources.scope(trigger).listened) {
+            incoming = trigger.human && trigger.addressed ? { ...trigger,
+              channel: { source: 'dingtalk', thread: `dingtalk:${notificationGroup}`,
+                address: { conversationId: notificationGroup, triggerId: trigger.id, eventLabel: githubEventLabel(trigger) } } }
+              : githubEventTask(trigger, notificationGroup)
+          }
           return store.atomic(() => {
             const result = passes.receive(incoming)
+            if (result === 'stored' && incoming.taskRequest) received?.(incoming)
             if (result === 'stored' && incoming.source === 'github') {
               sessions.relay(`github-event:${incoming.id}`, JSON.stringify({ kind: 'github_event',
                 ...triggerMessage(incoming, incoming.url ? { source_url: incoming.url } : {}),
@@ -237,6 +242,7 @@ export class Runtime extends Service implements SourceHost {
         } }
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
         cardReplies: {
+          current: ticketId => workerReplyCard(runtime.context({ kind: 'dingtalk', health: [] }), ticketId)?.card_id,
           resolve: (id, ticketId) => resolveCardReply(runtime.context({ kind: 'dingtalk', health: [] }), id, ticketId),
           pending: ticketId => pendingCardReplies(runtime.context({ kind: 'dingtalk', health: [] }), ticketId),
           acknowledge: (id, text, ticketId) => {

@@ -24,7 +24,7 @@ import type { RegisterTool, Tool } from './tools/tool.ts'
 export interface SessionsHost {
   /** DSH Cordis context: sessions, agents, persistence, and their events. */
   readonly context: Context
-  readonly store: Pick<Store, 'tickets' | 'settings' | 'get' | 'set' | 'keys'>
+  readonly store: Pick<Store, 'tickets' | 'triggers' | 'settings' | 'get' | 'set' | 'keys'>
   readonly prompts: Pick<Prompts, 'current' | 'version' | 'compose' | 'skills'>
   readonly effects: Pick<Effects, 'enqueue' | 'handle' | 'idle' | 'pending'>
   /** The `models` health entry, which reports managed sessions waiting on a model-budget retry. */
@@ -189,7 +189,10 @@ export class Sessions {
         const message = JSON.parse(text)
         if (['worker_report', 'worker_attention'].includes(message.kind) && message.ticket?.ticket_id) {
           const card = this.host.replyCard(message.ticket.ticket_id)
-          if (card) text = JSON.stringify({ ...message, reply_card: card })
+          const instructions = message.kind === 'worker_report' && message.trigger_id
+            ? this.host.store.triggers.get(message.trigger_id)?.taskRequest?.replyInstructions : undefined
+          if (card || instructions) text = JSON.stringify({ ...message, ...(card ? { reply_card: card } : {}),
+            ...(instructions ? { reply_instructions: instructions } : {}) })
         }
       } catch { /* Non-JSON relays have no worker-card association. */ }
     }

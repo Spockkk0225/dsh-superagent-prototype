@@ -96,6 +96,11 @@ export class MasterAssessor implements Assessor {
     host.effects.handle('assessment', async ({ triggerId }, evalId) => {
       const candidate = this.host.engine.candidate(triggerId)
       if (candidate?.evalId !== evalId) return
+      const task = candidate.triggers.length === 1 && candidate.triggers[0]?.taskRequest
+      if (task && candidate.strength === 'explicit') {
+        this.host.engine.decide(triggerId, { kind: 'accept', evalId, ...task, reason: 'Configured GitHub event task' })
+        return
+      }
       await this.host.deliver(`candidate:${evalId}`, JSON.stringify({ kind: 'candidate', ...await this.host.candidateCard(candidate) }))
       this.host.engine.candidateDelivered(evalId)
     }, { limit: () => host.paused() ? 0 : 4 })

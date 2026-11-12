@@ -39,10 +39,10 @@ export function workerReplyCard(context: SourceContext, ticketId: string) {
 export function resolveCardReply(context: SourceContext, id: string, ticketId?: string) {
   const card = context.state.get(cards(id))
   if (!card || ticketId && card.ticketId !== ticketId) throw new Error('Card is not bound to this task')
-  if (!pendingCardReplies(context, ticketId).some(pending => pending.card_id === id)) {
+  if (!closed(card) && !pendingCardReplies(context, ticketId).some(pending => pending.card_id === id)) {
     throw new Error('This card has no open processing round; do not send another final reply')
   }
-  return { ticket_id: card.ticketId, channel: { source: 'dingtalk', thread: `dingtalk:${card.conversationId}`,
+  return { ticket_id: card.ticketId, closed: !!closed(card), channel: { source: 'dingtalk', thread: `dingtalk:${card.conversationId}`,
     address: { conversationId: card.conversationId, triggerId: card.triggerId, cardId: id } } }
 }
 

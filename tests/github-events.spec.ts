@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { startRuntime } from './fixtures/host.ts'
 import { Commands } from '../src/infra/commands.ts'
-import { pollRequests, pollScheduledCi } from '../src/sources/github-events.ts'
+import { pollRequests } from '../src/sources/github-events.ts'
 import { githubKind, pollRound } from '../src/sources/github.ts'
 import { branchCiTrigger, commentTrigger } from '../src/sources/github-trigger.ts'
 import { dingTalkKind, DingTalk } from '../src/sources/dingtalk.ts'
@@ -57,18 +57,24 @@ it('uses the actual assigner, ignores removed and unrelated requests, and applie
   expect(h.runtime.store.triggers.get(key('github-request', '22'))).toBeUndefined()
 })
 
-it('reuses branch CI polling on main and keeps the existing admission and reply flow', async () => {
-  h = await startRuntime(undefined, 'test-group')
-  const sent: OutboundMessage[] = []
-  h.runtime.sources.register(dingTalkKind(async message => { sent.push(message) }))
-  let check = { name: 'Nightly linux_arm64', status: 'completed', conclusion: 'failure' as string | null }
+it('runs settled main checks as group tasks and updates one card per execution, including nightly', async () => {
+  let robot: DingTalk
+  h = await startRuntime(undefined, 'test-group', trigger => robot.received(trigger))
+  const group = dingTalkKind(message => robot.send(message))
+  h.runtime.sources.register(group)
+  const policy = h.runtime.store.settings().policy
+  await h.runtime.settings.save('policy', { ...policy, sources: { ...policy.sources,
+    dingtalk: { allowed: [], admission: { group: { unlistedAddressed: 'explicit' } } } } }, h.runtime.store.blockRevision('policy'), 'panel')
+  const http = vi.fn<typeof fetch>(async url => new Response(JSON.stringify(String(url).includes('/oauth2/')
+    ? { accessToken: 'token', expireIn: 7200 } : {})))
+  robot = new DingTalk(h.runtime.context(group), { clientId: 'robot', clientSecret: 'test' }, () => {}, http, 'card-template')
+  let check = { id: 123, name: 'Nightly', status: 'in_progress', conclusion: null as string | null }
   const calls = vi.spyOn(Commands.prototype, 'run').mockImplementation(async (_program, args) => {
     const path = args[1]!.replace(/^repos\/acme\/widgets\/?/, '').split('?')[0]
     if (['issues', 'issues/comments', 'pulls/comments'].includes(path!)) return 'HTTP/2.0 200 OK\r\n\r\n[]'
     if (path === 'commits/main') return JSON.stringify({ sha: 'abc1234567' })
     if (path === 'commits/abc1234567/check-runs') return JSON.stringify([{ check_runs: [check] }])
     if (path === 'commits/abc1234567/statuses') return JSON.stringify([[]])
-    if (path === 'actions/runs') return JSON.stringify([{ workflow_runs: [] }])
     throw new Error('Unexpected endpoint: ' + path)
   })
   vi.spyOn(Commands.prototype, 'gh').mockImplementation(async function (this: Commands, args) {
@@ -76,43 +82,50 @@ it('reuses branch CI polling on main and keeps the existing admission and reply 
   })
   const original = h.runtime.context(githubKind)
   const source = { ...original, deployment: { ...original.deployment, github: { ...original.deployment.github, auth: 'app' as const } } }
-  await pollRound(source); await h.runtime.idle()
-  expect(sent).toHaveLength(0)
-  expect(h.runtime.store.get(KV.github.branchCi)?.failures).toContain('Nightly linux_arm64')
-  const events = () => h!.relays(h!.runtime.masterId).filter(item => item.kind === 'github_event')
-  expect(events()).toHaveLength(1)
-  expect(events()[0]).toMatchObject({ event: 'GitHub Main CI', human: false,
-    meta: { ci: true, branch: 'main' }, reply_channel: { source: 'dingtalk', address: { conversationId: 'test-group' } } })
-  expect(JSON.stringify(events()[0])).toContain('Nightly linux_arm64')
-  expect(h.candidates()).toEqual([])
-  await pollRound(source); await h.runtime.idle()
-  expect(sent).toHaveLength(0)
-  expect(events()).toHaveLength(1)
-  const previous = h.runtime.store.get(KV.github.branchCi)
-  calls.mockRejectedValueOnce(new Error('HTTP 503'))
-  await expect(pollRound(source)).rejects.toThrow('HTTP 503')
-  expect(h.runtime.store.get(KV.github.branchCi)).toEqual(previous)
-  check = { ...check, conclusion: null, status: 'in_progress' }
-  await pollRound(source); await h.runtime.idle()
-  expect(sent).toHaveLength(0)
-  check = { ...check, conclusion: 'success', status: 'completed' }
-  await pollRound(source); await h.runtime.idle()
-  expect(sent).toHaveLength(0)
-  expect(h.runtime.store.get(KV.github.branchCi)?.failures).toEqual([])
-  expect(events()).toHaveLength(2)
-  expect(h.candidates()).toEqual([])
+  const poll = async () => { await pollRound(source); await h!.runtime.idle() }
+  const updates = () => http.mock.calls.filter(([url]) => String(url).includes('/card/instances'))
+    .map(([, init]) => JSON.parse(init!.body as string))
+  await poll()
+  expect(updates()).toHaveLength(0)
+  for (const conclusion of ['failure', 'success']) {
+    check = { ...check, id: check.id + 1, status: 'completed', conclusion }
+    const previous = updates().length
+    await poll(); await poll(); await poll()
+    const title = conclusion === 'failure' ? 'Investigate main CI failures' : 'Report main CI results'
+    const ticket = h.runtime.store.tickets.open().find(t => t.title === title)!
+    expect(ticket.mandate.strength).toBe('explicit')
+    expect(ticket.mandate.scope).toContain('check count by status')
+    expect(h.runtime.store.triggers.get(ticket.origin.triggerId)).toMatchObject({ source: 'dingtalk',
+      meta: { githubEvent: { source: 'github', human: false, text: expect.stringContaining('CI ') } } })
+    expect(updates().slice(previous).map(update => update.cardData.cardParamMap.flowStatus)).toEqual(['1', '2'])
+    await h.runTool(`worker-${ticket.id}`, 'orchestrator_report', { state: 'ready', summary: conclusion })
+    await h.runtime.idle()
+    expect(h.relays(h.runtime.masterId)).toContainEqual(expect.objectContaining({
+      kind: 'worker_report', trigger_id: ticket.origin.triggerId, reply_instructions: expect.stringContaining('what triggered CI'),
+    }))
+    await h.runTool(h.runtime.masterId, 'orchestrator_reply', { ticket_id: ticket.id, purpose: 'result', text: conclusion })
+    await h.runtime.idle()
+    expect(updates().slice(previous).map(update => update.cardData.cardParamMap.flowStatus)).toEqual(['1', '2', '3'])
+    expect(new Set(updates().slice(previous).map(update => update.outTrackId)).size).toBe(1)
+  }
+  expect(calls.mock.calls.some(([, args]) => args.some(arg => arg.includes('actions/runs')))).toBe(false)
 })
 
 it.each(['assignment', 'review_request', 'conversation', 'inline', 'review', 'pr-ci', 'main-ci'])(
   'relays each new %s event to the main agent even when admission would reject it', async kind => {
     h = await startRuntime()
-    const trigger = kind === 'main-ci' ? branchCiTrigger('main', 'abc123', 1, 'Nightly failed', 'https://github.com/acme/widgets/commit/abc123')
+    const trigger = kind === 'main-ci' ? branchCiTrigger('main', 'abc123', 1, 'Nightly failed', 'https://github.com/acme/widgets/commit/abc123', 1)
       : { ...comment(91, 'Original event body', 'guest'), human: !['review', 'pr-ci'].includes(kind),
         addressed: kind === 'pr-ci' ? undefined : 'mention' as const,
         meta: { number: 7, isPr: kind !== 'assignment', kind, ...kind === 'pr-ci' ? { ci: true } : {} } }
     const source = h.runtime.context(githubKind)
     await source.receive(trigger); await h.runtime.idle()
     const events = () => h!.relays(h!.runtime.masterId).filter(item => item.kind === 'github_event')
+    if (kind === 'pr-ci') {
+      expect(events()).toEqual([])
+      expect(h.runtime.store.triggers.get(trigger.id)).toBeUndefined()
+      return
+    }
     expect(events()).toHaveLength(1)
     expect(events()[0]).toMatchObject({ trigger_id: trigger.id, source_url: trigger.url, text: trigger.text })
     expect(h.candidates()).toEqual([])
@@ -120,46 +133,6 @@ it.each(['assignment', 'review_request', 'conversation', 'inline', 'review', 'pr
     expect(events()).toHaveLength(1)
   })
 
-it('delivers each completed main schedule run regardless of result, including reruns and an older commit', async () => {
-  h = await startRuntime(undefined, 'test-group')
-  const started = new Date(Date.now() - 60_000).toISOString()
-  const run = { id: 100, run_attempt: 1, name: 'Nightly', event: 'schedule', status: 'completed', conclusion: 'success',
-    head_branch: 'main', head_sha: 'older-commit', html_url: 'https://github.com/acme/widgets/actions/runs/100',
-    updated_at: new Date().toISOString() }
-  let runs = [{ ...run, updated_at: new Date(Date.parse(started) - 60_000).toISOString() },
-    { ...run, id: 101, status: 'in_progress', conclusion: null }, { ...run, id: 102, event: 'push' },
-    { ...run, id: 103, head_branch: 'feature' }]
-  const calls = vi.spyOn(Commands.prototype, 'run').mockImplementation(async (_program, args) => {
-    expect(args[1]).toContain('actions/runs?branch=main&event=schedule&status=completed')
-    expect(args).toContain('--paginate')
-    expect(args).toContain('--slurp')
-    return JSON.stringify([{ workflow_runs: runs.slice(0, 1) }, { workflow_runs: runs.slice(1) }])
-  })
-  vi.spyOn(Commands.prototype, 'gh').mockImplementation(async function (this: Commands, args) {
-    return JSON.parse(await this.run(this.deployment.github.cli, args))
-  })
-  const poll = async () => { await pollScheduledCi(h!.runtime.context(githubKind), 'main', started); await h!.runtime.idle() }
-  const events = () => h!.relays(h!.runtime.masterId).filter(item => item.kind === 'github_event')
-  await poll()
-  expect(events()).toHaveLength(0)
-  runs = [run, { ...run, id: 101, conclusion: 'failure' }]
-  await poll()
-  expect(events()).toHaveLength(2)
-  expect(events()[0]).toMatchObject({ meta: { event: 'schedule', conclusion: 'success', sha: 'older-commit' },
-    reply_channel: { source: 'dingtalk', address: { conversationId: 'test-group' } } })
-  expect(events()[1]).toMatchObject({ meta: { event: 'schedule', conclusion: 'failure' } })
-  await poll()
-  expect(events()).toHaveLength(2)
-  runs = [{ ...run, run_attempt: 2 }, { ...run, id: 104 }]
-  await poll()
-  expect(events()).toHaveLength(4)
-  expect(events()[2]).toMatchObject({ meta: { runId: 100, runAttempt: 2, conclusion: 'success' } })
-  expect(events()[3]).toMatchObject({ meta: { runId: 104, conclusion: 'success' } })
-  await poll()
-  expect(events()).toHaveLength(4)
-  expect(calls).toHaveBeenCalledTimes(5)
-  expect(h.candidates()).toEqual([])
-})
 
 it('keeps an own PR subscribed after ready and routes unmentioned comments to its original worker', async () => {
   h = await startRuntime(undefined, 'test-group')
@@ -180,7 +153,7 @@ it('keeps an own PR subscribed after ready and routes unmentioned comments to it
   expect(sent).toHaveLength(1)
   expect(sent[0]).toMatchObject({ kind: 'acknowledgement', text: 'Fixing PR.',
     channel: { source: 'dingtalk', address: { conversationId: 'test-group', eventLabel: 'GitHub Comment Mention' } } })
-  expect(githubSent).toHaveLength(0)
+  expect(githubSent.map(m => m.kind)).toEqual(['acknowledgement'])
   h.runtime.engine.bindThread(id, { source: 'github', id: '7' }, true)
   await h.runTool(`worker-${id}`, 'orchestrator_report', { state: 'ready', summary: 'Ready for review' })
   await h.runtime.idle()
@@ -190,13 +163,15 @@ it('keeps an own PR subscribed after ready and routes unmentioned comments to it
   await h.runtime.idle()
   expect(sent.at(-1)).toMatchObject({ kind: 'reply', text: 'Ready for review',
     channel: { source: 'dingtalk', address: { conversationId: 'test-group', eventLabel: 'GitHub Comment Mention' } } })
-  expect(githubSent).toHaveLength(0)
+  expect(githubSent.map(m => m.kind)).toEqual(['acknowledgement', 'reply'])
   expect(h.runtime.store.tickets.get(id)!.ended).toBeUndefined()
   const update = comment(2, 'Please fix this edge case', 'guest')
   await source.receive(update); await h.runtime.idle()
   expect(h.runtime.store.tickets.get(id)!.inputs.some(input => input.kind === 'trigger' && input.triggerId === update.id)).toBe(true)
   expect(h.relays(h.runtime.masterId).filter(item => item.kind === 'github_event' && item.trigger_id === update.id))
-    .toMatchObject([{ delivered_to: [id] }])
+    .toHaveLength(0)
+  expect(h.runtime.store.triggers.get(update.id)).toMatchObject({ source: 'dingtalk',
+    meta: { githubEvent: { id: update.id, actor: update.actor } } })
   expect(h.runtime.store.tickets.open()).toHaveLength(1)
   expect(h.candidates()).toHaveLength(1)
   await h.runTool(`worker-${id}`, 'orchestrator_report', { state: 'blocked', summary: 'Need the failing input to reproduce' })
@@ -254,7 +229,7 @@ it('uses the existing receipt, acknowledgement and result card for a GitHub revi
   expect(bodies()[1]).toMatchObject({ outTrackId: bodies()[0].outTrackId,
     cardData: { cardParamMap: { flowStatus: '2', status: '输出中' } } })
   expect(bodies()[1].cardData.cardParamMap.markdown).toContain(`#${id.slice(0, 12)} · GitHub PR Review Request`)
-  expect(githubSent).toHaveLength(0)
+  expect(githubSent.map(m => m.kind)).toEqual(['acknowledgement'])
   expect(h.runtime.store.triggers.get(key('github-request', '77'))).toMatchObject({ source: 'github',
     url: 'https://github.com/acme/widgets/pull/7', meta: { number: 7, isPr: true, kind: 'review_request' },
     channel: { source: 'dingtalk', address: { conversationId: 'test-group' } } })
@@ -264,13 +239,13 @@ it('uses the existing receipt, acknowledgement and result card for a GitHub revi
   await h.runTool(h.runtime.masterId, 'orchestrator_reply', { ticket_id: id, purpose: 'result', text: 'Review complete.' })
   await h.runtime.idle()
   expect(bodies()).toHaveLength(3)
-  expect(githubSent).toHaveLength(0)
+  expect(githubSent.map(m => m.kind)).toEqual(['acknowledgement', 'reply'])
   expect(bodies()[2]).toMatchObject({ outTrackId: bodies()[0].outTrackId,
     cardData: { cardParamMap: { flowStatus: '3', status: '完成' } } })
   expect(bodies()[2].cardData.cardParamMap.markdown).toContain('Reviewing PR 7.\n\n---\n\nReview complete.')
   await h.runTool(h.runtime.masterId, 'orchestrator_reply', { ticket_id: id, purpose: 'result', text: 'Review complete.' })
   await h.runtime.idle()
   expect(bodies()).toHaveLength(3)
-  expect(githubSent).toHaveLength(0)
+  expect(githubSent.map(m => m.kind)).toEqual(['acknowledgement', 'reply'])
   expect(http.mock.calls.filter(([url]) => String(url).includes('groupMessages/send'))).toHaveLength(0)
 })

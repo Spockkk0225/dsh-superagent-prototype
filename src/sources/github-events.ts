@@ -2,10 +2,8 @@
 import { z } from 'zod'
 import { key, type Trigger } from '../core/index.ts'
 import { sameName } from '../infra/text.ts'
-import { KV } from '../kv.ts'
 import type { SourceContext } from './host.ts'
 import { githubChannel, githubPage, isHumanLogin, UserSchema } from './github-trigger.ts'
-import { POLL_HORIZON_MS } from './poll.ts'
 
 /** Source labels accompany existing acknowledgement and result replies in the configured group. */
 export function githubEventLabel(trigger: Trigger): string {
@@ -16,28 +14,32 @@ export function githubEventLabel(trigger: Trigger): string {
   return trigger.addressed ? 'GitHub Comment Mention' : 'GitHub PR Comment'
 }
 
-const ScheduledRun = z.looseObject({ id: z.number(), run_attempt: z.number().default(1), name: z.string().nullish(),
-  event: z.string(), status: z.string(), conclusion: z.string().nullable(), head_branch: z.string().nullable(),
-  head_sha: z.string(), html_url: z.string().url(), updated_at: z.string() })
-
-/** Scheduled runs report every completion, including success and reruns of the same commit. */
-export async function pollScheduledCi(ctx: SourceContext, branch: string, started: string, signal?: AbortSignal): Promise<void> {
-  const name = KV.github.scheduledSince(branch)
-  const since = ctx.state.get(name) ?? started
-  ctx.state.set(name, since)
-  const created = new Date(Date.parse(started) - POLL_HORIZON_MS).toISOString()
-  const pages = await ctx.commands.withSignal(signal).api(z.array(z.looseObject({ workflow_runs: z.array(ScheduledRun) })),
-    `actions/runs?branch=${encodeURIComponent(branch)}&event=schedule&status=completed&per_page=100&created=${encodeURIComponent(`>=${created}`)}`,
-    '--paginate', '--slurp')
-  for (const run of pages.flatMap(page => page.workflow_runs).sort((a, b) => a.updated_at.localeCompare(b.updated_at))) {
-    if (run.event !== 'schedule' || run.status !== 'completed' || run.head_branch !== branch || !run.conclusion
-      || Date.parse(run.updated_at) < Date.parse(since)) continue
-    await ctx.receive({ id: key('github-scheduled-ci', String(run.id), String(run.run_attempt)), source: 'github',
-      threads: [{ source: 'github', id: `ci:${branch}` }], actor: { source: 'github', id: '' }, human: false,
-      at: run.updated_at, url: run.html_url,
-      text: `Scheduled CI completed: ${run.name ?? run.id}\nBranch: ${branch}\nCommit: ${run.head_sha}\nConclusion: ${run.conclusion}\n${run.html_url}`,
-      meta: { ci: true, branch, sha: run.head_sha, event: 'schedule', runId: run.id, runAttempt: run.run_attempt,
-        workflow: run.name, conclusion: run.conclusion } })
+/** A deployment-authored group request. Keep the GitHub actor and payload for audit and never attribute it to a group member. */
+export function githubEventTask(event: Trigger, conversationId: string): Trigger {
+  const ci = event.meta.ci === true
+  const failed = Number(event.meta.failed) > 0
+  const title = ci ? failed ? 'Investigate main CI failures' : 'Report main CI results' : 'Assess the GitHub event'
+  const replyInstructions = [
+    'Write the final DingTalk card in the language of the group. Open with what triggered CI.',
+    'Verify the event field of each GitHub Actions run for this commit SHA. For a push to main, include the PR number if you confirm it was merged. Identify schedule runs as scheduled checks and name any other event type.',
+    'If the commit has runs from multiple sources, group the workflows by source on the same card. Mark an unverified source as unknown. A workflow name such as nightly does not establish the trigger.',
+    'Give the branch, short SHA, and check count by status. Name the main checks, including nightly if present, and their results. Explain known reasons for failures or skips and link to the checks.',
+  ].join(' ')
+  const task = ci ? failed ? 'Inspect the failed checks and logs for this commit and explain the cause with evidence on the original card.'
+    : 'Report the CI results for this commit on the original card.'
+    : 'Assess this GitHub event within the scope of the existing ticket and reply with the outcome in the language of the DingTalk group. If there is no related ticket, verify and report what happened.'
+  const instruction = ci ? `${task} ${replyInstructions}` : task
+  return {
+    id: event.id, source: 'dingtalk', human: true, addressed: 'mention', actor: { source: 'dingtalk', id: 'github-event-adapter' },
+    // Each CI execution is independent. A pull event uses the original thread so its existing worker receives the request.
+    threads: ci ? [{ source: 'dingtalk', id: event.id }] : event.threads,
+    at: event.at, url: event.url, text: `${instruction}\n\nOriginal GitHub event:\n${event.text}`,
+    channel: { source: 'dingtalk', thread: `dingtalk:${conversationId}`,
+      address: { conversationId, triggerId: event.id, eventLabel: githubEventLabel(event) } },
+    meta: { conversationType: '2', conversationId, githubEvent: event },
+    taskRequest: { title, scope: instruction, name: ci ? 'main-ci' : 'github-event',
+      ...(ci ? { replyInstructions } : {}),
+      acknowledgement: ci ? failed ? '收到，正在排查本次 main CI 的失败原因。' : '收到，正在核对本次 main CI 结果。' : '收到，正在核对这条 GitHub 事件。' },
   }
 }
 
