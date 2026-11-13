@@ -284,20 +284,35 @@ async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
   const sameBranch = previous?.branch === branch
   let revision = previous?.revision ?? 0
   let reported = sameBranch ? previous?.reported : undefined
+  let reportedSnapshot = sameBranch ? previous?.reportedSnapshot : undefined
   if (counts.running || !snapshot.checks.length && !snapshot.statuses.length
     || snapshot.checks.some(check => check.conclusion === null)) {
-    ctx.state.set(KV.github.branchCi, { branch, failures: sameBranch ? previous?.failures : undefined, revision, reported })
+    ctx.state.set(KV.github.branchCi, { branch, failures: sameBranch ? previous?.failures : undefined, revision, reported,
+      reportedSnapshot })
     return
   }
   if (sameBranch && previous?.settled === fingerprint && reported !== fingerprint) {
-    revision += 1
-    const summary = ciSummary(snapshot, branch, `github/commits/${head.sha}/checks`)
-    const url = `https://github.com/${ctx.deployment.repository}/commit/${head.sha}`
-    await ctx.receive(branchCiTrigger(branch, head.sha, revision, summary, url, counts.failed))
-    ctx.threads.describe(`github:ci:${branch}`, { label: `CI on ${branch}`, facts: { ci: ciFact(counts) } })
+    const last = reportedSnapshot?.head === head.sha ? reportedSnapshot : undefined
+    const checks = new Set(last?.checks.map(check => check.id ?? check.name))
+    const statuses = new Set(last?.statuses.map(status => status.context))
+    const changes = { head: snapshot.head,
+      checks: snapshot.checks.filter(check => !checks.has(check.id ?? check.name)),
+      statuses: snapshot.statuses.filter(status => !statuses.has(status.context)) }
+    if (changes.checks.length || changes.statuses.length) {
+      revision += 1
+      const summary = ciSummary(changes, branch, `github/commits/${head.sha}/checks`)
+      const url = `https://github.com/${ctx.deployment.repository}/commit/${head.sha}`
+      const trigger = branchCiTrigger(branch, head.sha, revision, summary, url, ciCounts(changes).failed)
+      trigger.meta.checks = changes
+      trigger.text += `\nNew checks and statuses for this task:\n${JSON.stringify(changes)}`
+      await ctx.receive(trigger)
+      ctx.threads.describe(`github:ci:${branch}`, { label: `CI on ${branch}`, facts: { ci: ciFact(counts) } })
+      reportedSnapshot = snapshot
+    }
     reported = fingerprint
   }
-  ctx.state.set(KV.github.branchCi, { branch, failures, revision, settled: fingerprint, reported })
+  ctx.state.set(KV.github.branchCi, { branch, failures, revision, settled: fingerprint, reported,
+    reportedSnapshot })
 }
 /**
  * One polling round: notifications, then observed repository streams, then lifecycle state of ticket PRs, then

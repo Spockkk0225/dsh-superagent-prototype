@@ -21,6 +21,7 @@ export function githubEventTask(event: Trigger, conversationId: string): Trigger
   const title = ci ? failed ? 'Investigate main CI failures' : 'Report main CI results' : 'Assess the GitHub event'
   const replyInstructions = [
     'Write the final DingTalk card in the language of the group. Open with what triggered CI.',
+    'Inspect and report only the checks and statuses listed in the original event; do not include previously reported results from the same commit. Use the supplied check IDs to locate their workflow runs and logs.',
     'Verify the event field of each GitHub Actions run for this commit SHA. For a push to main, include the PR number if you confirm it was merged. Identify schedule runs as scheduled checks and name any other event type.',
     'If the commit has runs from multiple sources, group the workflows by source on the same card. Mark an unverified source as unknown. A workflow name such as nightly does not establish the trigger.',
     'Give the branch, short SHA, and check count by status. Name the main checks, including nightly if present, and their results. Explain known reasons for failures or skips and link to the checks.',

@@ -69,11 +69,12 @@ it('runs settled main checks as group tasks and updates one card per execution, 
     ? { accessToken: 'token', expireIn: 7200 } : {})))
   robot = new DingTalk(h.runtime.context(group), { clientId: 'robot', clientSecret: 'test' }, () => {}, http, 'card-template')
   let check = { id: 123, name: 'Nightly', status: 'in_progress', conclusion: null as string | null }
+  const completed: typeof check[] = []
   const calls = vi.spyOn(Commands.prototype, 'run').mockImplementation(async (_program, args) => {
     const path = args[1]!.replace(/^repos\/acme\/widgets\/?/, '').split('?')[0]
     if (['issues', 'issues/comments', 'pulls/comments'].includes(path!)) return 'HTTP/2.0 200 OK\r\n\r\n[]'
     if (path === 'commits/main') return JSON.stringify({ sha: 'abc1234567' })
-    if (path === 'commits/abc1234567/check-runs') return JSON.stringify([{ check_runs: [check] }])
+    if (path === 'commits/abc1234567/check-runs') return JSON.stringify([{ check_runs: [...completed.filter(item => item.id !== check.id), check] }])
     if (path === 'commits/abc1234567/statuses') return JSON.stringify([[]])
     throw new Error('Unexpected endpoint: ' + path)
   })
@@ -88,15 +89,21 @@ it('runs settled main checks as group tasks and updates one card per execution, 
   await poll()
   expect(updates()).toHaveLength(0)
   for (const conclusion of ['failure', 'success']) {
-    check = { ...check, id: check.id + 1, status: 'completed', conclusion }
+    check = { ...check, id: check.id + 1, status: 'in_progress', conclusion: null }
     const previous = updates().length
-    await poll(); await poll(); await poll()
+    await poll(); await poll()
+    expect(updates()).toHaveLength(previous)
+    check = { ...check, status: 'completed', conclusion }
+    await poll()
+    expect(updates()).toHaveLength(previous)
+    await poll(); await poll()
     const title = conclusion === 'failure' ? 'Investigate main CI failures' : 'Report main CI results'
     const ticket = h.runtime.store.tickets.open().find(t => t.title === title)!
     expect(ticket.mandate.strength).toBe('explicit')
     expect(ticket.mandate.scope).toContain('check count by status')
     expect(h.runtime.store.triggers.get(ticket.origin.triggerId)).toMatchObject({ source: 'dingtalk',
-      meta: { githubEvent: { source: 'github', human: false, text: expect.stringContaining('CI ') } } })
+      meta: { githubEvent: { source: 'github', human: false, text: expect.stringContaining(`${conclusion === 'failure' ? 'failed' : 'passed'} 1/1`),
+        meta: { failed: conclusion === 'failure' ? 1 : 0, checks: { head: 'abc1234567', checks: [check], statuses: [] } } } } })
     expect(updates().slice(previous).map(update => update.cardData.cardParamMap.flowStatus)).toEqual(['1', '2'])
     await h.runTool(`worker-${ticket.id}`, 'orchestrator_report', { state: 'ready', summary: conclusion })
     await h.runtime.idle()
@@ -107,7 +114,18 @@ it('runs settled main checks as group tasks and updates one card per execution, 
     await h.runtime.idle()
     expect(updates().slice(previous).map(update => update.cardData.cardParamMap.flowStatus)).toEqual(['1', '2', '3'])
     expect(new Set(updates().slice(previous).map(update => update.outTrackId)).size).toBe(1)
+    completed.push(check)
   }
+  // Previously reported failures remain in the full snapshot, but never become another task.
+  const previous = updates().length
+  completed.splice(1)
+  check = completed.pop()!
+  await poll(); await poll(); await poll()
+  expect(updates()).toHaveLength(previous)
+  // A changed conclusion on an already reported check is not a new check.
+  check = { ...check, conclusion: 'success' }
+  await poll(); await poll(); await poll()
+  expect(updates()).toHaveLength(previous)
   expect(calls.mock.calls.some(([, args]) => args.some(arg => arg.includes('actions/runs')))).toBe(false)
 })
 

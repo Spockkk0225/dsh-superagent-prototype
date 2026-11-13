@@ -6,6 +6,7 @@ import type { PromptVersion } from './app/prompts.ts'
 import type { SettingsVersion } from './app/store.ts'
 import type { SettingsSave } from './policy.ts'
 import type { Retry } from './sources/github.ts'
+import type { CiSnapshot } from './sources/github-read.ts'
 
 /** Key of a KV record whose value has type `V`; a plain string represents an untyped key. */
 export type Key<V> = string & { readonly __value?: V }
@@ -46,7 +47,8 @@ export const KV = {
   github: { since: record<string>('github-since'), retries: record<Record<string, Retry>>('github-retry'),
     cursor: family<string, [number: number]>('github-cursor:'),
     stream: family<{ since: string; started: Record<string, string>; etag?: string }, [stream: string]>('github-stream:'),
-    branchCi: record<{ branch?: string; failures?: string[]; revision: number; settled?: string; reported?: string }>('github-branch-ci'),
+    branchCi: record<{ branch?: string; failures?: string[]; revision: number; settled?: string; reported?: string;
+      reportedSnapshot?: CiSnapshot }>('github-branch-ci'),
     ci: family<{ fingerprint: string; revision: number; settled?: string; reported?: string }, [number: number]>('github-ci:') },
   /**
    * Feishu Source: known chats (`true` for direct messages); per-chat history cursor and active topics mapped from topic ID
