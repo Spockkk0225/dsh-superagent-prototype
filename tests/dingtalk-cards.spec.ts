@@ -36,6 +36,17 @@ async function receipt() {
   return pending
 }
 const requestBody = (call: number) => JSON.parse(http.mock.calls[call]![1].body)
+it.each([
+  { source: 'dingtalk', eventLabel: 'GitHub Main CI', label: 'GitHub Main CI' },
+  { source: 'request', eventLabel: undefined, label: 'request' },
+])('identifies $label in the pending receipt', async ({ source, eventLabel, label }) => {
+  origin.source = source
+  if (eventLabel) origin.channel!.address.eventLabel = eventLabel
+  const pending = await receipt()
+  const text = `已收到 ${label} 消息。`
+  expect(pending.text).toBe(text)
+  expect(requestBody(0).cardData.cardParamMap).toMatchObject({ flowStatus: '2', markdown: expect.stringContaining(text) })
+})
 it('queues a durable AI waiting card immediately on intake without registering a private reply callback', async () => {
   const listeners = new Map<string, (frame: any) => Promise<void>>()
   const register = vi.spyOn(DWClient.prototype, 'registerCallbackListener').mockImplementation(function (this: DWClient, topic, listener) {
@@ -49,7 +60,7 @@ it('queues a durable AI waiting card immediately on intake without registering a
     await listeners.get(TOPIC_ROBOT)!(frame)
     expect(notify).toHaveBeenCalledOnce()
     const pending = notify.mock.calls[0]![0] as OutboundMessage
-    expect(pending.text).toContain('处理中')
+    expect(pending.text).toBe('已收到 dingtalk 消息。')
     expect(context.triggers.get(pending.channel.address.triggerId!)).toBeDefined()
     expect(ack).toHaveBeenCalledWith('delivery', null)
     expect(http).not.toHaveBeenCalled() // No remote API or model call blocks the Stream receive ACK.
@@ -57,23 +68,29 @@ it('queues a durable AI waiting card immediately on intake without registering a
     expect(notify).toHaveBeenCalledOnce()
   } finally { register.mockRestore(); ack.mockRestore() }
 })
-it('shows worker acceptance as writing and appends its result to the same card', async () => {
+it('keeps the source receipt and appends confirmation and result, retaining the spinner until the final reply', async () => {
   await receipt()
   expect(requestBody(0)).toMatchObject({ cardTemplateId: 'template.schema',
-    openSpaceId: 'dtv1.card//IM_GROUP.group', cardData: { cardParamMap: { flowStatus: '1', status: '处理中' } } })
+    openSpaceId: 'dtv1.card//IM_GROUP.group', cardData: { cardParamMap: {
+      flowStatus: '2', status: '输出中', markdown: '已收到 dingtalk 消息。' } } })
   await cards.send(message())
   expect(http.mock.calls[1]![1].method).toBe('PUT')
-  expect(requestBody(1)).toMatchObject({ outTrackId: receiptId(origin.id), cardData: { cardParamMap: { flowStatus: '2', status: '输出中', markdown: '#ticket\n\n正在检查' } } })
+  expect(requestBody(1)).toMatchObject({ outTrackId: receiptId(origin.id), cardData: { cardParamMap: {
+    flowStatus: '2', status: '输出中', markdown: '#ticket\n\n已收到 dingtalk 消息。\n\n---\n\n正在检查' } } })
   await cards.send(message({ id: 'result', kind: 'reply', text: '检查完成' }))
   expect(http.mock.calls[2]![1].method).toBe('PUT')
   expect(requestBody(2).outTrackId).toBe(receiptId(origin.id))
-  expect(requestBody(2).cardData.cardParamMap).toMatchObject({ flowStatus: '3', status: '完成', markdown: '#ticket\n\n正在检查\n\n---\n\n检查完成' })
+  expect(requestBody(2).cardData.cardParamMap).toMatchObject({
+    flowStatus: '3', status: '完成', markdown: '#ticket\n\n已收到 dingtalk 消息。\n\n---\n\n正在检查\n\n---\n\n检查完成' })
 })
 it('completes a direct answer without creating a worker or leaving the card writing', async () => {
   await receipt()
+  await expect(cards.send(message({ id: 'early-answer', kind: 'reply', ticketId: undefined })))
+    .rejects.toThrow('Send the initial card confirmation')
+  await cards.send(message({ ticketId: undefined }))
   await cards.send(message({ id: 'answer', kind: 'reply', ticketId: undefined, text: '直接回答' }))
-  expect(requestBody(1)).toMatchObject({ outTrackId: receiptId(origin.id), cardData: { cardParamMap: {
-    flowStatus: '3', status: '完成', markdown: '直接回答',
+  expect(requestBody(2)).toMatchObject({ outTrackId: receiptId(origin.id), cardData: { cardParamMap: {
+    flowStatus: '3', status: '完成', markdown: '已收到 dingtalk 消息。\n\n---\n\n正在检查\n\n---\n\n直接回答',
   } } })
 })
 it('retains appended feedback across transport restarts and retries without duplicates or status regression', async () => {
@@ -87,7 +104,8 @@ it('retains appended feedback across transport restarts and retries without dupl
   await cards.send(message())
   for (const call of [2, 3, 4]) {
     expect(requestBody(call).outTrackId).toBe(receiptId(origin.id))
-    expect(requestBody(call).cardData.cardParamMap).toMatchObject({ flowStatus: '3', markdown: '#ticket\n\n正在检查\n\n---\n\n检查完成' })
+    expect(requestBody(call).cardData.cardParamMap).toMatchObject({ flowStatus: '3',
+      markdown: '#ticket\n\n已收到 dingtalk 消息。\n\n---\n\n正在检查\n\n---\n\n检查完成' })
   }
 })
 it('uses a new card for a quoted followup and keeps unrelated tickets separate', async () => {
@@ -98,19 +116,24 @@ it('uses a new card for a quoted followup and keeps unrelated tickets separate',
   cards.received(followup)
   const pending = notify.mock.calls.at(-1)![0] as OutboundMessage
   await cards.send(pending)
+  // An idle worker starts a new round; confirm the new card before its final reply.
+  cards.delivery('ticket', 'followup-delivery', 'followup', false)
+  await cards.send(message({ id: 'followup-ack', channel: followup.channel, text: '继续检查' }))
   await cards.send(message({ id: 'followup-result', kind: 'reply', channel: followup.channel, text: '追问结果' }))
-  expect(requestBody(3)).toMatchObject({ outTrackId: receiptId('followup'), cardData: { cardParamMap: { markdown: '#ticket\n\n追问结果' } } })
+  expect(requestBody(4)).toMatchObject({ outTrackId: receiptId('followup'), cardData: { cardParamMap: {
+    flowStatus: '3', markdown: '#ticket\n\n已收到 dingtalk 消息。\n\n---\n\n继续检查\n\n---\n\n追问结果' } } })
+  await cards.send(message({ id: 'other-ack', ticketId: 'other' }))
   await cards.send(message({ id: 'other-ticket', kind: 'reply', ticketId: 'other', text: '其他任务' }))
-  expect(requestBody(4).outTrackId).not.toBe(receiptId('followup'))
-  expect(requestBody(4).outTrackId).not.toBe(receiptId(origin.id))
+  expect(requestBody(6).outTrackId).not.toBe(receiptId('followup'))
+  expect(requestBody(6).outTrackId).not.toBe(receiptId(origin.id))
 })
 it('puts the task reference in the native quote summary and body without unsupported client API actions', async () => {
   await receipt()
-  expect(requestBody(0).cardData.cardParamMap.markdown).toBe('已收到，处理中…')
+  expect(requestBody(0).cardData.cardParamMap.markdown).toBe('已收到 dingtalk 消息。')
   await cards.send(message())
   const data = requestBody(1).cardData.cardParamMap
   expect(data.title).toBe('#ticket Super agent')
-  expect(data.markdown).toBe('#ticket\n\n正在检查')
+  expect(data.markdown).toBe('#ticket\n\n已收到 dingtalk 消息。\n\n---\n\n正在检查')
   expect(data.replyHint).toBe('---\n\n引用此卡片以回复消息。')
   expect(requestBody(0).callbackType).toBeUndefined()
   expect(http.mock.calls.every(call => call[0].startsWith('https://api.dingtalk.com/v1.0/card/instances'))).toBe(true)
@@ -119,13 +142,20 @@ it('exports a complete AI template with sibling states and nonstreaming feedback
   const read = (name: string) => JSON.parse(readFileSync(new URL(`../cards/${name}`, import.meta.url), 'utf8'))
   const schema = read('dingtalk-superagent.editor.json')
   expect(JSON.parse(read('dingtalk-superagent.json').editorData)).toEqual(schema)
-  expect(schema.extension).toMatchObject({ extendType: 'AI', aiStatusList: [1, 2, 3] })
+  expect(schema.extension).toMatchObject({ extendType: 'AI', aiStatusList: [2, 3] })
   const root = schema.schema.componentsTree[0]
   expect(root.props.summaryContent.variable).toBe('title')
-  expect(root.children.map((node: any) => node.props.status)).toEqual([1, 2, 3])
-  const feedback = root.children[2].children[0].children
+  expect(root.props.enablePending).toBe(false)
+  expect(root.children.map((node: any) => node.props.status)).toEqual([2, 3])
+  const writing = root.children[0].children[0]
+  expect(writing.componentName).toBe('AICardContent')
+  expect(writing.children[0]).toMatchObject({ componentName: 'MarkdownBlock',
+    props: { isStreaming: false, content: { type: 'variableValue', variable: 'markdown' } } })
+  const feedback = root.children[1].children[0].children
   expect(feedback[0]).toMatchObject({ componentName: 'MarkdownBlock', props: { isStreaming: false, content: { variable: 'markdown' } } })
-  expect(root.children[1].children[0].children[0]).toMatchObject({ componentName: 'MarkdownBlock', props: { isStreaming: false, content: { variable: 'markdown' } } })
+  expect(writing.children.find((node: any) => node.componentName === 'AIPending').props.pendingTip)
+    .toEqual({ type: 'dynamicString', content: '处理中…', i18n: false })
+  expect(feedback.some((node: any) => node.componentName === 'AIPending')).toBe(false)
   const visit = (node: any) => {
     expect(node.componentName).not.toBe('SingleButton')
     if (node !== root) expect(node.children?.some((child: any) => child.componentName === 'AICardStatusContainer') ?? false).toBe(false)

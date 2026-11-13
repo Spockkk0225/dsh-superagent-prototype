@@ -104,7 +104,7 @@ it('runs settled main checks as group tasks and updates one card per execution, 
     expect(h.runtime.store.triggers.get(ticket.origin.triggerId)).toMatchObject({ source: 'dingtalk',
       meta: { githubEvent: { source: 'github', human: false, text: expect.stringContaining(`${conclusion === 'failure' ? 'failed' : 'passed'} 1/1`),
         meta: { failed: conclusion === 'failure' ? 1 : 0, checks: { head: 'abc1234567', checks: [check], statuses: [] } } } } })
-    expect(updates().slice(previous).map(update => update.cardData.cardParamMap.flowStatus)).toEqual(['1', '2'])
+    expect(updates().slice(previous).map(update => update.cardData.cardParamMap.flowStatus)).toEqual(['2', '2'])
     await h.runTool(`worker-${ticket.id}`, 'orchestrator_report', { state: 'ready', summary: conclusion })
     await h.runtime.idle()
     expect(h.relays(h.runtime.masterId)).toContainEqual(expect.objectContaining({
@@ -112,7 +112,7 @@ it('runs settled main checks as group tasks and updates one card per execution, 
     }))
     await h.runTool(h.runtime.masterId, 'orchestrator_reply', { ticket_id: ticket.id, purpose: 'result', text: conclusion })
     await h.runtime.idle()
-    expect(updates().slice(previous).map(update => update.cardData.cardParamMap.flowStatus)).toEqual(['1', '2', '3'])
+    expect(updates().slice(previous).map(update => update.cardData.cardParamMap.flowStatus)).toEqual(['2', '2', '3'])
     expect(new Set(updates().slice(previous).map(update => update.outTrackId)).size).toBe(1)
     completed.push(check)
   }
@@ -237,7 +237,7 @@ it('uses the existing receipt, acknowledgement and result card for a GitHub revi
   expect(bodies()).toHaveLength(1)
   expect(githubSent).toHaveLength(0)
   expect(bodies()[0]).toMatchObject({ openSpaceId: 'dtv1.card//IM_GROUP.test-group',
-    cardData: { cardParamMap: { flowStatus: '1', status: '处理中' } } })
+    cardData: { cardParamMap: { flowStatus: '2', status: '输出中', markdown: expect.stringContaining('已收到 GitHub PR Review Request 消息。') } } })
   await poll(); await h.runtime.idle()
   expect(bodies()).toHaveLength(1)
   const routed = await h.route({ kind: 'accept', trigger_id: key('github-request', '77'), title: 'Review PR',
@@ -261,6 +261,7 @@ it('uses the existing receipt, acknowledgement and result card for a GitHub revi
   expect(bodies()[2]).toMatchObject({ outTrackId: bodies()[0].outTrackId,
     cardData: { cardParamMap: { flowStatus: '3', status: '完成' } } })
   expect(bodies()[2].cardData.cardParamMap.markdown).toContain('Reviewing PR 7.\n\n---\n\nReview complete.')
+  expect(bodies()[2].cardData.cardParamMap.markdown).toContain('已收到 GitHub PR Review Request 消息。\n\n---\n\nReviewing PR 7.')
   await h.runTool(h.runtime.masterId, 'orchestrator_reply', { ticket_id: id, purpose: 'result', text: 'Review complete.' })
   await h.runtime.idle()
   expect(bodies()).toHaveLength(3)

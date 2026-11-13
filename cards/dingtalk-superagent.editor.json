@@ -63,7 +63,7 @@
         "componentName": "AICardContainer",
         "id": "superagent_ai",
         "props": {
-          "enablePending": true,
+          "enablePending": false,
           "enableWriting": true,
           "enableDoing": false,
           "enableFailed": false,
@@ -92,40 +92,6 @@
         "condition": true,
         "conditionGroup": "",
         "children": [
-          {
-            "componentName": "AICardStatusContainer",
-            "id": "pending_state",
-            "props": {
-              "status": 1,
-              "enableExtend": false,
-              "enableCollapse": false
-            },
-            "hidden": false,
-            "title": "AICardStatusContainer",
-            "isLocked": false,
-            "condition": true,
-            "conditionGroup": "",
-            "children": [
-              {
-                "componentName": "AIPending",
-                "id": "pending",
-                "props": {
-                  "pendingTip": {
-                    "type": "dynamicString",
-                    "content": "已收到，处理中…",
-                    "i18n": false
-                  },
-                  "style": "embed",
-                  "hideIcon": false
-                },
-                "hidden": false,
-                "title": "AIPending",
-                "isLocked": false,
-                "condition": true,
-                "conditionGroup": ""
-              }
-            ]
-          },
           {
             "componentName": "AICardStatusContainer",
             "id": "writing_state",
@@ -191,7 +157,7 @@
                     "props": {
                       "pendingTip": {
                         "type": "dynamicString",
-                        "content": "输出中…",
+                        "content": "处理中…",
                         "i18n": false
                       },
                       "style": "embed",
@@ -298,9 +264,9 @@
   "mockData": {
     "cardData": {
       "flowStatus": "3",
-      "title": "#5e0e259f5059 NeuG机器人",
+      "title": "#5e0e259f5059 · GitHub Main CI · Super agent",
       "status": "完成",
-      "markdown": "#5e0e259f5059\n\n### 检查结果\n已完成 PR 检查，暂未发现问题。",
+      "markdown": "#5e0e259f5059 · GitHub Main CI\n\n已收到 GitHub Main CI 消息。\n\n---\n\nI will inspect the failed checks and identify the cause.\n\n---\n\nInvestigation completed. The failed job is missing a test dependency.",
       "replyHint": "---\n\n引用此卡片以回复消息。"
     },
     "cardPrivateData": {},
@@ -367,7 +333,6 @@
       }
     ],
     "aiStatusList": [
-      1,
       2,
       3
     ]

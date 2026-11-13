@@ -25,6 +25,7 @@ const triggerCards = family<string, [string]>('dingtalk-card-trigger:')
 const taskCards = family<string, [string]>('dingtalk-card-task:')
 const workerDeliveries = family<string, [string, string]>('dingtalk-card-worker-delivery:')
 export const receiptId = (triggerId: string) => key('dingtalk-received', triggerId)
+const receiptText = (trigger: Trigger) => `已收到 ${trigger.channel?.address.eventLabel ?? trigger.source} 消息。`
 const activeKey = (conversation: string, ticket: string) => activeCards(key(conversation, ticket))
 const triggerKey = (conversation: string, trigger: string, ticket = '') => triggerCards(key(conversation, trigger, ticket))
 const closed = (card: Card) => card.closed ?? card.messages?.at(-1)?.flowStatus === '3'
@@ -233,7 +234,7 @@ export class DingTalkCards {
       templateId: this.templateId, used: false, sent: false, closed: false,
       ...trigger.source === 'github' && trigger.human && trigger.addressed ? { githubMentions: [trigger.id] } : {} })
     this.context.notify({ id, kind: 'notice',
-      channel: { ...trigger.channel!, address: { ...trigger.channel!.address, cardId: id } }, text: '已收到，处理中…' })
+      channel: { ...trigger.channel!, address: { ...trigger.channel!.address, cardId: id } }, text: receiptText(trigger) })
   }
 
   /** Called synchronously immediately before a worker message is submitted; every delivery has an immutable card binding. */
@@ -266,7 +267,7 @@ export class DingTalkCards {
       this.context.state.set(activeKey(conversation, ticketId), id)
       this.context.state.set(taskCards(ticketId), id)
       if (!existing) this.context.notify({ id: key('dingtalk-round-received', id), kind: 'notice', ticketId,
-        channel: { ...trigger.channel, address: { ...trigger.channel.address, cardId: id } }, text: '已收到，处理中…' })
+        channel: { ...trigger.channel, address: { ...trigger.channel.address, cardId: id } }, text: receiptText(trigger) })
       return { card_id: id, ticket_id: ticketId }
     })
   }
@@ -299,12 +300,13 @@ export class DingTalkCards {
     }
     this.context.state.set(cards(id), card)
     const taskLabel = card.ticketId ? `#${card.ticketId.slice(0, 12)}` : ''
-    const eventLabel = this.context.triggers.get(card.triggerId)?.channel?.address.eventLabel
+    const cardOrigin = this.context.triggers.get(card.triggerId) ?? origin
+    const eventLabel = cardOrigin.channel?.address.eventLabel
     const heading = [taskLabel, eventLabel].filter(Boolean).join(' · ')
-    const flowStatus = placeholder ? card.informational ? '3' : '1' : card.messages!.at(-1)!.flowStatus
-    const text = placeholder ? message.text : card.messages!.map(item => item.text).join('\n\n---\n\n')
+    const flowStatus = placeholder ? card.informational ? '3' : '2' : card.messages!.at(-1)!.flowStatus
+    const text = [receiptText(cardOrigin), ...card.messages?.map(item => item.text) ?? []].join('\n\n---\n\n')
     const data = { title: [heading, this.robotName].filter(Boolean).join(' '),
-      status: flowStatus === '1' ? '处理中' : flowStatus === '2' ? '输出中' : '完成',
+      status: flowStatus === '2' ? '输出中' : '完成',
       markdown: heading ? `${heading}\n\n${text}` : text, flowStatus,
       replyHint: '---\n\n引用此卡片以回复消息。',
     }
