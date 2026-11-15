@@ -1,15 +1,15 @@
-Every processing round bound to a card requires both an initial agent confirmation before processing and an explicit final reply on that same card, for both the main agent and workers, regardless of whether the input is a human request or a system event.
+Every external event bound to a card requires both an initial agent confirmation before processing and an explicit final reply on that same card, for both the main agent and workers, regardless of whether the input is a human request or a system event.
 The receiving agent owns the initial confirmation: the main agent confirms work delivered to it, and a worker confirms work delivered directly to it.
 Use orchestrator_card_reply action=acknowledge with the exact card_id and one brief sentence naming the object and intended handling; the automatic "received, processing" receipt does not count.
 If a human request's normal orchestrator_ack or acceptance acknowledgement has already confirmed this round's card, do not duplicate it.
-Additional events delivered to a worker already executing the same card's round share its initial confirmation; a new round's new card needs its own confirmation.
-Each worker delivery carries reply_card; use its exact card_id throughout that processing round. The same trigger delivered to two workers has two independent card confirmations and results.
+Each new external event has its own card and confirmation, even when delivered to a busy worker. Retries and internal handoffs of the same event reuse its card and confirmation.
+Each worker delivery carries reply_card with card_id and trigger_id; use that input's exact card_id in all card replies and orchestrator_report calls. Workers have no current card. The same event handed to another worker or split across tasks retains the same card; never allocate a card for an internal execution round.
 A reply on another card does not satisfy this card's initial confirmation or final reply, even when both cards concern the same request or outcome.
-Worker reports preserve reply_card for the main agent; copy that card_id into orchestrator_reply rather than selecting the task's latest card, which may already belong to a newer round.
+Worker reports preserve the explicitly supplied input reply_card for the main agent; copy that card_id into orchestrator_reply. Never infer a destination from the worker's history, the task's original request, or a newer input.
 This includes ignored requests, duplicate notifications, ordinary discussion needing no action, handbacks, cancellation, failure and work that ends without changes; a bound card is never silently abandoned.
 Use the normal authorized result, answer or attention reply for that purpose; for a no-action or other terminal card outcome, use orchestrator_card_reply with the exact bound card_id and one brief factual sentence.
 Use orchestrator_card_reply action=list to inspect pending cards; an internal report, silent turn end or assistant text is not a card reply.
-For a no-action outcome, finish the card before reporting dropped or ending the worker's ticket; for a normal deliverable, report it and let the main agent send the authorized final result on that card.
+For a terminal no-action outcome, finish the card before reporting dropped or ending the worker's ticket; for a normal deliverable, report it and let the main agent send the authorized final result on that card. A handback or task transfer continues the event: preserve its binding and leave the card open for the receiving task rather than claiming the event is finished.
 Do not finish a card while another agent is still working on its round, and do not duplicate a result already queued on that card.
 This card-reply obligation takes precedence over instructions to stay silent, avoid repeating an outcome or drop without a message; it grants no work authority, and does not let a card reply certify unverified work or bypass a rejected result, answer or attention reply.
 Without a bound card, the existing silence rules still apply.
@@ -33,8 +33,8 @@ Before substantial investigation or changes for a human request, follow-up or re
 Name the concrete object and intended result so humans can recognize the accepted work.
 The host replies to the triggering message, so the reply already shows it; never repeat or quote it.
 This applies within an existing ticket without another mention.
-The host posts the worker-provided acknowledgement in the original thread. With a bound card, it deduplicates by card/processing round across retries and restarts, including the specific acknowledgement queued at ticket acceptance; different workers' cards never share the same confirmation key.
-Without a bound card, acknowledgements retain the original source-trigger deduplication. New messages in an executing card round reuse its initial confirmation; a new card needs a new one.
+The host posts the worker-provided acknowledgement in the original thread. With a bound card, it deduplicates by external event across retries, restarts and task handoffs, including the specific acknowledgement queued at ticket acceptance.
+Without a bound card, acknowledgements retain the original source-trigger deduplication. A new external message needs its own card confirmation; internal task deliveries reuse the event's confirmation.
 Read the original source to judge whether it requests work; orchestrator_ack remains reserved for human work requests.
 For bots, CI, thanks or ordinary discussion with a bound card, use the universal card confirmation and final reply instead; this confirms receipt and handling, not new work authority.
 Answer quick questions directly without an extra acknowledgement only when there is no bound card.

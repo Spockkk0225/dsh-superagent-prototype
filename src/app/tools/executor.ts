@@ -80,6 +80,7 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
       schema: z.object({
         state: z.enum(['progress', 'ready', 'blocked', 'failed', 'dropped']),
         summary: z.string().min(1),
+        card_id: z.string().min(1).optional().describe('Copy reply_card.card_id from the input this report handles. Required when handling a bound card; carried unchanged to the main agent.'),
         human_action: z.string().trim().min(1).max(1000).nullish().describe('One concrete question for a person, also with state=progress; omit to keep the pending one, null to clear it.'),
         question_for_trigger_id: z.string().optional().describe('With human_action: the human message that raised the question, which is asked where that person wrote.'),
         pr_number: z.number().int().positive().nullish().describe(`The ticket's PR: its source PR, or one by ${host.github.deployment.github.login} from a branch named after this ticket (DSH_SUPERAGENT_NAME).`),
@@ -88,6 +89,14 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
       execute: async (args, signal) => {
         const current = host.store.tickets.get(ticketId)
         if (!current || !liveTicket(current)) throw new Error('Ticket ended (PR was closed or work finished); do not resume it')
+        const binding = args.card_id ? host.cardReplies?.resolve(args.card_id, ticketId) : undefined
+        if (args.card_id && !binding) throw new Error('Card replies are unavailable')
+        if (!args.card_id && host.cardReplies?.has(ticketId)) {
+          throw new Error('Copy card_id from the input reply_card; a worker has no current card')
+        }
+        if (binding && args.reply_to_trigger_id && binding.channel.address.triggerId !== args.reply_to_trigger_id) {
+          throw new Error('card_id must belong to reply_to_trigger_id')
+        }
         const pull = args.pr_number != null ? await readPull(host.github, args.pr_number, signal) : undefined
         // Claim the PR, record the report, and queue the relay atomically so a rejected PR claim or invalid report leaves no partial state, and a recorded report always reaches the main Session.
         return host.store.atomic(() => {
@@ -98,7 +107,9 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
             ...(args.reply_to_trigger_id ? { answers: args.reply_to_trigger_id } : {}) }
           const updated = host.engine.report(ticketId, report)
           const relay = reportRelay(updated, report)
-          if (relay) host.sessions.relay(relay.id, relay.text)
+          if (relay) host.sessions.relay(relay.id, binding ? JSON.stringify({ ...JSON.parse(relay.text), reply_card: {
+            card_id: args.card_id, ticket_id: ticketId, trigger_id: binding.channel.address.triggerId,
+          } }) : relay.text)
           const notification = relay ? 'orchestrator' : 'internal_only'
           return { reported: true, notification, ...(updated.attention ? { attention: updated.attention } : {}) }
         })

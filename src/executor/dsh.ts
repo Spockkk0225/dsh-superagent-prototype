@@ -463,8 +463,13 @@ export class DshExecutor implements Executor {
     const card = told || !source ? undefined : await this.triggerCard(ticket, source.id)
     if (!current()) return
     const batch = told ? [] : batchOf(this.host, ticket).map(batchLine)
-    const text = told ? JSON.stringify({ ticket_id: ticket.id, assignment: ticket.assignments.length, ...retried })
-      : JSON.stringify({ ticket_id: ticket.id, title: ticket.title, ...(brief ? { assignment: brief } : {}),
+    // Carry the assignment's input event explicitly; the transport must not select a worker's newest card.
+    const pending = ticket.inputs.find(input => input.kind === 'trigger' && !input.context && ticket.undelivered.includes(input.id))
+    const triggerId = pending?.kind === 'trigger' ? pending.triggerId : source?.id
+    const inputEvent = triggerId && this.host.store.triggers.get(triggerId)?.channel?.source === 'dingtalk'
+      ? { trigger_id: triggerId } : {}
+    const text = told ? JSON.stringify({ ticket_id: ticket.id, assignment: ticket.assignments.length, ...inputEvent, ...retried })
+      : JSON.stringify({ ticket_id: ticket.id, title: ticket.title, ...inputEvent, ...(brief ? { assignment: brief } : {}),
         ...(read ? { assignment_chars: chars, assignment_read: read } : {}), ...(card ? { trigger: card } : {}),
         ...(batch.length ? { batch } : {}), ...retried })
     const requestId = later ? `assignment:${ticket.id}:${assignment.id}` : first

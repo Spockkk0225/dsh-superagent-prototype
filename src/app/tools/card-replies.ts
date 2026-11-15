@@ -4,10 +4,10 @@ import { AcknowledgementSchema, tool, type Tool } from './tool.ts'
 import type { ChannelRef } from '../../core/index.ts'
 
 export interface CardReplies {
+  has(ticketId?: string, triggerId?: string): boolean
   pending(ticketId?: string): { card_id: string; trigger_id: string; ticket_id?: string }[]
   acknowledge(cardId: string, text: string, ticketId?: string): string
   reply(cardId: string, text: string, ticketId?: string): string
-  current(ticketId: string): string | undefined
   resolve(cardId: string, ticketId?: string): { ticket_id?: string; channel: ChannelRef; closed?: boolean }
 }
 

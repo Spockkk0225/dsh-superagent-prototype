@@ -230,20 +230,20 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
         trigger_id: z.string().optional().describe('The original human question, for an answer only.'),
         ticket_id: z.string().optional(),
         purpose: z.enum(['answer', 'result', 'attention']),
-        card_id: z.string().optional().describe('Copy reply_card.card_id from the worker report or the original message; preserves that exact round even if the worker has started another.'),
+        card_id: z.string().optional().describe('Copy reply_card.card_id from this input or worker report. Required for card-bound tasks; never select a card from worker history.'),
         human_action: z.string().trim().min(1).optional().describe('Required for attention: the ticket\'s current attention question.'),
         text: z.string().min(1).max(20000),
       }).strict(),
       execute: async args => {
-        let cardId = args.card_id
-        if (!cardId && host.cardReplies) {
-          const pending = host.cardReplies.pending(args.ticket_id).filter(card => args.ticket_id
-            || args.trigger_id && card.trigger_id === args.trigger_id)
-          if (pending.length > 1) throw new Error('Multiple card rounds exist; copy card_id from the worker report reply_card')
-          cardId = pending[0]?.card_id ?? (args.ticket_id && args.purpose === 'result' ? host.cardReplies.current(args.ticket_id) : undefined)
+        const cardId = args.card_id
+        if (!cardId && host.cardReplies?.has(args.ticket_id, args.trigger_id)) {
+          throw new Error('Copy card_id from this input or worker report reply_card')
         }
         if (cardId && !host.cardReplies) throw new Error('Card replies are unavailable')
         const binding = cardId ? host.cardReplies!.resolve(cardId, args.ticket_id) : undefined
+        if (binding && args.trigger_id && binding.channel.address.triggerId !== args.trigger_id) {
+          throw new Error('card_id must belong to trigger_id')
+        }
         const ticketId = args.ticket_id ?? binding?.ticket_id
         const reply = host.engine.reply({ purpose: args.purpose, text: args.text, ...(args.trigger_id ? { triggerId: args.trigger_id } : {}),
           ...(ticketId ? { ticketId } : {}), ...(binding ? { channel: binding.channel, existingOnly: binding.closed } : {}),

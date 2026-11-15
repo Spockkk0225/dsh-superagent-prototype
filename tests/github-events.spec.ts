@@ -59,7 +59,8 @@ it('uses the actual assigner, ignores removed and unrelated requests, and applie
 
 it('runs settled main checks as group tasks and updates one card per execution, including nightly', async () => {
   let robot: DingTalk
-  h = await startRuntime(undefined, 'test-group', trigger => robot.received(trigger))
+  h = await startRuntime(undefined, 'test-group', trigger => robot.received(trigger),
+    (ticketId, deliveryId, triggerId) => robot.bindWorkerDelivery(ticketId, deliveryId, triggerId))
   const group = dingTalkKind(message => robot.send(message))
   h.runtime.sources.register(group)
   const policy = h.runtime.store.settings().policy
@@ -105,12 +106,19 @@ it('runs settled main checks as group tasks and updates one card per execution, 
       meta: { githubEvent: { source: 'github', human: false, text: expect.stringContaining(`${conclusion === 'failure' ? 'failed' : 'passed'} 1/1`),
         meta: { failed: conclusion === 'failure' ? 1 : 0, checks: { head: 'abc1234567', checks: [check], statuses: [] } } } } })
     expect(updates().slice(previous).map(update => update.cardData.cardParamMap.flowStatus)).toEqual(['2', '2'])
-    await h.runTool(`worker-${ticket.id}`, 'orchestrator_report', { state: 'ready', summary: conclusion })
+    const input = h.relays(`worker-${ticket.id}`).find(item => item.reply_card)!
+    const binding = input.reply_card as { card_id: string; trigger_id: string }
+    expect(binding.trigger_id).toBe(ticket.origin.triggerId)
+    await expect(h.runTool(`worker-${ticket.id}`, 'orchestrator_report', { state: 'ready', summary: conclusion }))
+      .rejects.toThrow('Copy card_id')
+    await h.runTool(`worker-${ticket.id}`, 'orchestrator_report', { state: 'ready', summary: conclusion, card_id: binding.card_id })
     await h.runtime.idle()
     expect(h.relays(h.runtime.masterId)).toContainEqual(expect.objectContaining({
-      kind: 'worker_report', trigger_id: ticket.origin.triggerId, reply_instructions: expect.stringContaining('what triggered CI'),
+      kind: 'worker_report', trigger_id: ticket.origin.triggerId, reply_card: binding, reply_instructions: expect.stringContaining('what triggered CI'),
     }))
-    await h.runTool(h.runtime.masterId, 'orchestrator_reply', { ticket_id: ticket.id, purpose: 'result', text: conclusion })
+    await expect(h.runTool(h.runtime.masterId, 'orchestrator_reply', { ticket_id: ticket.id, purpose: 'result', text: conclusion }))
+      .rejects.toThrow('Copy card_id')
+    await h.runTool(h.runtime.masterId, 'orchestrator_reply', { ticket_id: ticket.id, purpose: 'result', text: conclusion, card_id: binding.card_id })
     await h.runtime.idle()
     expect(updates().slice(previous).map(update => update.cardData.cardParamMap.flowStatus)).toEqual(['2', '2', '3'])
     expect(new Set(updates().slice(previous).map(update => update.outTrackId)).size).toBe(1)
@@ -215,7 +223,8 @@ it('uses text replies with task and event labels when cards are disabled and no 
 
 it('uses the existing receipt, acknowledgement and result card for a GitHub review request', async () => {
   let robot: DingTalk | undefined
-  h = await startRuntime(undefined, 'test-group', trigger => robot!.received(trigger))
+  h = await startRuntime(undefined, 'test-group', trigger => robot!.received(trigger),
+    (ticketId, deliveryId, triggerId) => robot!.bindWorkerDelivery(ticketId, deliveryId, triggerId))
   const kind = dingTalkKind(message => robot!.send(message))
   h.runtime.sources.register(kind)
   const githubSent: OutboundMessage[] = []
@@ -251,10 +260,12 @@ it('uses the existing receipt, acknowledgement and result card for a GitHub revi
   expect(h.runtime.store.triggers.get(key('github-request', '77'))).toMatchObject({ source: 'github',
     url: 'https://github.com/acme/widgets/pull/7', meta: { number: 7, isPr: true, kind: 'review_request' },
     channel: { source: 'dingtalk', address: { conversationId: 'test-group' } } })
-  await h.runTool(`worker-${id}`, 'orchestrator_report', { state: 'ready', summary: 'Review complete.' })
+  const binding = h.relays(`worker-${id}`).find(item => item.reply_card)!.reply_card as { card_id: string }
+  expect(binding.card_id).toBe(bodies()[0].outTrackId)
+  await h.runTool(`worker-${id}`, 'orchestrator_report', { state: 'ready', summary: 'Review complete.', card_id: binding.card_id })
   await h.runtime.idle()
   expect(bodies()).toHaveLength(2)
-  await h.runTool(h.runtime.masterId, 'orchestrator_reply', { ticket_id: id, purpose: 'result', text: 'Review complete.' })
+  await h.runTool(h.runtime.masterId, 'orchestrator_reply', { ticket_id: id, purpose: 'result', text: 'Review complete.', card_id: binding.card_id })
   await h.runtime.idle()
   expect(bodies()).toHaveLength(3)
   expect(githubSent.map(m => m.kind)).toEqual(['acknowledgement', 'reply'])
@@ -262,9 +273,56 @@ it('uses the existing receipt, acknowledgement and result card for a GitHub revi
     cardData: { cardParamMap: { flowStatus: '3', status: '完成' } } })
   expect(bodies()[2].cardData.cardParamMap.markdown).toContain('Reviewing PR 7.\n\n---\n\nReview complete.')
   expect(bodies()[2].cardData.cardParamMap.markdown).toContain('已收到 GitHub PR Review Request 消息。\n\n---\n\nReviewing PR 7.')
-  await h.runTool(h.runtime.masterId, 'orchestrator_reply', { ticket_id: id, purpose: 'result', text: 'Review complete.' })
+  await h.runTool(h.runtime.masterId, 'orchestrator_reply', { ticket_id: id, purpose: 'result', text: 'Review complete.', card_id: binding.card_id })
   await h.runtime.idle()
   expect(bodies()).toHaveLength(3)
   expect(githubSent.map(m => m.kind)).toEqual(['acknowledgement', 'reply'])
   expect(http.mock.calls.filter(([url]) => String(url).includes('groupMessages/send'))).toHaveLength(0)
+})
+
+it('keeps an older input binding in the report after a newer event reaches the same worker', async () => {
+  let robot: DingTalk
+  h = await startRuntime(undefined, 'test-group', trigger => robot.received(trigger),
+    (ticketId, deliveryId, triggerId) => robot.bindWorkerDelivery(ticketId, deliveryId, triggerId))
+  const kind = dingTalkKind(message => robot.send(message))
+  h.runtime.sources.register(kind)
+  const http = vi.fn<typeof fetch>(async url => new Response(JSON.stringify(String(url).includes('/oauth2/')
+    ? { accessToken: 'token', expireIn: 7200 } : {})))
+  robot = new DingTalk(h.runtime.context(kind), { clientId: 'robot', clientSecret: 'test' }, () => {}, http, 'template')
+  vi.spyOn(h.runtime.sources, 'send').mockImplementation(async message => {
+    if (message.channel.source === 'github') return 'sent'
+    await robot.send(message)
+    return 'sent'
+  })
+  const source = h.runtime.context(githubKind)
+  const first = comment(601)
+  await source.receive(first); await h.runtime.idle()
+  const routed = await h.route({ kind: 'accept', trigger_id: first.id, title: 'Fix edge case',
+    worktree_name: 'fix-edge-case', acknowledgement: 'Fixing the edge case.' })
+  const id = (routed.ticket as { ticket_id: string }).ticket_id
+  await h.runtime.idle()
+  const worker = `worker-${id}`
+  const original = h.relays(worker).find(item => item.reply_card)!.reply_card as { card_id: string }
+  h.agents.get(worker)!.status = 'running'
+  const second = comment(602, '@agent-bot also explain verification')
+  await source.receive(second); await h.runtime.idle()
+  const newer = h.relays(worker).find(item => item.trigger_id === second.id)!.reply_card as { card_id: string }
+  expect(newer.card_id).not.toBe(original.card_id)
+  await expect(h.runTool(worker, 'orchestrator_report', { state: 'ready', summary: 'Old work finished.' }))
+    .rejects.toThrow('Copy card_id')
+  await h.runTool(worker, 'orchestrator_report', { state: 'ready', summary: 'Old work finished.', card_id: original.card_id })
+  await h.runtime.idle()
+  expect(h.relays(h.runtime.masterId)).toContainEqual(expect.objectContaining({
+    kind: 'worker_report', summary: 'Old work finished.', reply_card: { ...original, ticket_id: id },
+  }))
+  await h.runTool(h.runtime.masterId, 'orchestrator_reply', {
+    ticket_id: id, card_id: original.card_id, purpose: 'result', text: 'Old work finished.',
+  })
+  const updates = http.mock.calls.filter(([url]) => String(url).includes('/card/instances'))
+    .map(([, init]) => JSON.parse(init!.body as string))
+  expect(updates.at(-1)).toMatchObject({ outTrackId: original.card_id,
+    cardData: { cardParamMap: { markdown: expect.stringContaining('Old work finished.') } } })
+  expect(await h.runTool(worker, 'orchestrator_card_reply', { action: 'list' })).toMatchObject({ cards: [
+    { card_id: newer.card_id, trigger_id: second.id },
+  ] })
 })

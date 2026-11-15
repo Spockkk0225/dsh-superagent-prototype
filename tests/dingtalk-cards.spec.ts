@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { DWClient, TOPIC_ROBOT } from 'dingtalk-stream'
 import { DingTalk, dingTalkTrigger } from '../src/sources/dingtalk.ts'
-import { DingTalkCards, receiptId } from '../src/sources/dingtalk-cards.ts'
+import { acknowledgeCard, DingTalkCards, pendingCardReplies, receiptId, replyToCard, resolveCardReply } from '../src/sources/dingtalk-cards.ts'
 import type { SourceContext } from '../src/sources/host.ts'
 import type { OutboundMessage, Trigger } from '../src/core/index.ts'
 import { readFileSync } from 'node:fs'
@@ -14,7 +14,8 @@ const raw = { msgId: 'incoming', conversationId: 'group', conversationType: '2',
 beforeEach(() => {
   const state = new Map(), triggers = new Map<string, Trigger>()
   notify = vi.fn()
-  context = { state: { get: (key: string) => state.get(key), set: (key: string, value: unknown) => { state.set(key, value) } },
+  context = { state: { get: (key: string) => state.get(key), set: (key: string, value: unknown) => { state.set(key, value) },
+    keys: (family: { prefix: string }) => [...state.keys()].filter(key => key.startsWith(family.prefix)) },
     triggers: { get: (id: string) => triggers.get(id) }, tickets: { get: (id: string) => id === 'ticket' ? { id, origin: { triggerId: origin.id } } : undefined, open: () => [] },
     receive: vi.fn((trigger: Trigger) => {
       if (triggers.has(trigger.id)) return 'duplicate'
@@ -108,7 +109,7 @@ it('retains appended feedback across transport restarts and retries without dupl
       markdown: '#ticket\n\n已收到 dingtalk 消息。\n\n---\n\n正在检查\n\n---\n\n检查完成' })
   }
 })
-it('uses a new card for a quoted followup and keeps unrelated tickets separate', async () => {
+it('uses a new event card for a quoted followup and preserves the original event on task handoff', async () => {
   await receipt()
   await cards.send(message())
   const followup = { ...origin, id: 'followup', channel: { ...origin.channel!, address: { ...origin.channel!.address, triggerId: 'followup' } } }
@@ -117,7 +118,7 @@ it('uses a new card for a quoted followup and keeps unrelated tickets separate',
   const pending = notify.mock.calls.at(-1)![0] as OutboundMessage
   await cards.send(pending)
   // An idle worker starts a new round; confirm the new card before its final reply.
-  cards.delivery('ticket', 'followup-delivery', 'followup', false)
+  cards.delivery('ticket', 'followup-delivery', 'followup')
   await cards.send(message({ id: 'followup-ack', channel: followup.channel, text: '继续检查' }))
   await cards.send(message({ id: 'followup-result', kind: 'reply', channel: followup.channel, text: '追问结果' }))
   expect(requestBody(4)).toMatchObject({ outTrackId: receiptId('followup'), cardData: { cardParamMap: {
@@ -125,7 +126,57 @@ it('uses a new card for a quoted followup and keeps unrelated tickets separate',
   await cards.send(message({ id: 'other-ack', ticketId: 'other' }))
   await cards.send(message({ id: 'other-ticket', kind: 'reply', ticketId: 'other', text: '其他任务' }))
   expect(requestBody(6).outTrackId).not.toBe(receiptId('followup'))
-  expect(requestBody(6).outTrackId).not.toBe(receiptId(origin.id))
+  expect(requestBody(6).outTrackId).toBe(receiptId(origin.id))
+})
+
+it('reuses the acceptance confirmation on first delivery even without an intake receipt', async () => {
+  // Reproduces the former fallback-send path: acknowledgement precedes any receipt binding.
+  await cards.send(message())
+  const binding = cards.delivery('ticket', 'assignment:ticket', origin.id)
+  expect(binding).toEqual({ card_id: receiptId(origin.id), ticket_id: 'ticket', trigger_id: origin.id })
+  expect(acknowledgeCard(context, binding!.card_id, 'do not duplicate', 'ticket')).toBe('ack')
+  await cards.send(message({ id: 'done', kind: 'reply', text: '完成', channel: resolveCardReply(context, binding!.card_id, 'ticket').channel }))
+  expect(http.mock.calls.map(call => call[1].method)).toEqual(['POST', 'PUT'])
+  expect(requestBody(1).outTrackId).toBe(requestBody(0).outTrackId)
+})
+
+it('keeps one event card across deliveries, task splits, restarts and retries', async () => {
+  context.triggers.targets = () => ['ticket']
+  await receipt()
+  await cards.send(message())
+  const first = cards.delivery('ticket', 'first', origin.id)!
+  const next = cards.delivery('other', 'handoff', origin.id)!
+  expect(next.card_id).toBe(first.card_id)
+  expect(resolveCardReply(context, next.card_id, 'other').channel.address.cardId).toBe(first.card_id)
+  expect(pendingCardReplies(context, 'other')).toHaveLength(1)
+  cards = new DingTalkCards(context, 'template.schema', async () => 'access-token', http as typeof fetch)
+  expect(cards.delivery('other', 'handoff', origin.id)).toEqual(next)
+  replyToCard(context, next.card_id, '交接后完成', 'other')
+  await cards.send(notify.mock.calls.at(-1)![0])
+  expect(http.mock.calls.filter(call => call[1].method === 'POST')).toHaveLength(1)
+  expect(requestBody(http.mock.calls.length - 1).cardData.cardParamMap.markdown).toContain('交接后完成')
+})
+
+it('routes interleaved inputs and late reports by their input binding instead of worker history', async () => {
+  const first = cards.delivery('ticket', 'first', origin.id)!
+  acknowledgeCard(context, first.card_id, '处理旧消息', 'ticket')
+  await cards.send(notify.mock.calls.at(-1)![0])
+  const followup = { ...origin, id: 'new-event', channel: { ...origin.channel!, address: { ...origin.channel!.address, triggerId: 'new-event' } } }
+  context.receive(followup)
+  const second = cards.delivery('ticket', 'second', followup.id)!
+  expect(second.card_id).not.toBe(first.card_id)
+  acknowledgeCard(context, second.card_id, '处理新消息', 'ticket')
+  await cards.send(notify.mock.calls.at(-1)![0])
+  replyToCard(context, first.card_id, '旧消息结果', 'ticket')
+  await cards.send(notify.mock.calls.at(-1)![0])
+  expect(requestBody(2).outTrackId).toBe(first.card_id)
+  expect(requestBody(2).cardData.cardParamMap.markdown).not.toContain('新消息')
+  replyToCard(context, second.card_id, '新消息结果', 'ticket')
+  await cards.send(notify.mock.calls.at(-1)![0])
+  expect(requestBody(3).outTrackId).toBe(second.card_id)
+  expect(requestBody(3).cardData.cardParamMap.markdown).not.toContain('旧消息')
+  expect(cards.delivery('ticket', 'first', origin.id)).toEqual(first)
+  expect(pendingCardReplies(context, 'ticket')).toHaveLength(0)
 })
 it('puts the task reference in the native quote summary and body without unsupported client API actions', async () => {
   await receipt()

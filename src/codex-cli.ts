@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   try {
     runtime = new Runtime(ctx, machine, () => { log('restart_required'); void stop() },
       process.env.DINGTALK_GITHUB_NOTIFY_CONVERSATION_ID?.trim() || undefined, trigger => robot?.received(trigger),
-      (ticketId, deliveryId, triggerId, busy) => robot?.bindWorkerDelivery(ticketId, deliveryId, triggerId, busy))
+      (ticketId, deliveryId, triggerId) => robot?.bindWorkerDelivery(ticketId, deliveryId, triggerId))
     runtime.lifetime.addEventListener('abort', () => { githubController.abort(); robot?.stop(); void harness.close() }, { once: true })
     runtime.sources.register(githubKind)
     const kind = dingTalkKind(message => robot!.send(message))

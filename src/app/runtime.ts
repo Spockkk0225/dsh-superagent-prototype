@@ -17,7 +17,7 @@ import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, ty
 import { allowedSender, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
 import { requestKind, requestTrigger } from '../sources/request.ts'
-import { acknowledgeCard, bindDingTalkReply, cardAcknowledgementId, githubMentionReplies, pendingCardReplies, remindCardReply, replyToCard, resolveCardReply, workerReplyCard } from '../sources/dingtalk-cards.ts'
+import { acknowledgeCard, bindDingTalkReply, cardAcknowledgementId, githubMentionReplies, hasCardBinding, pendingCardReplies, remindCardReply, replyToCard, resolveCardReply } from '../sources/dingtalk-cards.ts'
 import { Commands } from '../infra/commands.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import { environmentOf, ticketEnvironment, type Variable } from './execution-environment.ts'
@@ -89,7 +89,7 @@ export class Runtime extends Service implements SourceHost {
   private quiet = 0
   constructor(ctx: Context, readonly machine: Machine, restart: () => void, private readonly notificationGroup?: string,
     received?: (trigger: Trigger) => void,
-    workerDelivery?: (ticketId: string, deliveryId: string, triggerId: string, busy: boolean) => { card_id: string; ticket_id: string } | undefined) {
+    workerDelivery?: (ticketId: string, deliveryId: string, triggerId: string) => { card_id: string; ticket_id: string; trigger_id: string } | undefined) {
     super(ctx, 'orchestrator')
     const runtime = this
     // Lock the state directory before opening the database so another process cannot migrate or write concurrently.
@@ -130,24 +130,26 @@ export class Runtime extends Service implements SourceHost {
       const sessions = this.sessions = new Sessions({ context: ctx, store, prompts, effects, health: board.claim('models'), masterId,
         lifetime: this.lifetime,
         closing: () => this.closing(), environment,
-        bindWorkerDelivery: (ticket, requestId, text, busy) => {
+        bindWorkerDelivery: (ticket, requestId, text) => {
           if (ticket.ended) return text
           const input = ticket.inputs.find(item => item.id === requestId)
           if (input?.kind === 'trigger' && input.context) return text
-          const pending = ticket.inputs.filter(item => item.kind === 'trigger' && !item.context && ticket.undelivered.includes(item.id)).at(-1)
+          let assignmentTrigger: string | undefined
+          if (requestId.startsWith('assignment:')) {
+            try { assignmentTrigger = JSON.parse(text).trigger_id } catch { /* No event context: do not guess from task history. */ }
+          }
           const triggerId = input?.kind === 'trigger' ? input.triggerId
-            : requestId.startsWith('assignment:') ? pending?.kind === 'trigger' ? pending.triggerId : ticket.origin.triggerId : undefined
+            : assignmentTrigger
           if (!triggerId) return text
-          const card = workerDelivery?.(ticket.id, requestId, triggerId, busy || this.executor.busy(ticket.id))
+          const card = workerDelivery?.(ticket.id, requestId, triggerId)
           if (!card) return text
           try { return JSON.stringify({ ...JSON.parse(text), reply_card: card }) }
           catch { return `${text}\n\n${JSON.stringify({ reply_card: card })}` }
         },
-        replyCard: ticketId => workerReplyCard(runtime.context({ kind: 'dingtalk', health: [] }), ticketId),
         cardReplyInstructions: ticket => {
+          if (ticket) return '\nCard bindings belong to inputs, not workers. Copy reply_card.card_id from the input you are handling into orchestrator_report and all card replies. Preserve that binding on handoff; a newer input never redirects an older input\'s result. Confirm each event once and leave final completion to the receiving agent when handing off work.'
           const context = runtime.context({ kind: 'dingtalk', health: [] })
-          const current = ticket ? workerReplyCard(context, ticket.id) : undefined
-          const pending = pendingCardReplies(context, ticket?.id).filter(card => !ticket || card.card_id === current?.card_id)
+          const pending = pendingCardReplies(context)
           return pending.length ? `\n## Bound cards requiring initial confirmation and final reply\n${JSON.stringify(pending)}\nEvery bound card requires an initial agent confirmation before processing and an explicit final reply when its round ends, for both human requests and system events. If initial_confirmation_required is true, use orchestrator_card_reply action=acknowledge; the automatic receipt does not count. Use the normal result/answer/attention reply when authorized, or orchestrator_card_reply action=reply for a factual terminal no-action, ignored, duplicate, cancelled or failed outcome. An internal report or assistant text does not update a card. Main agent: do not finish a worker's card while it is still executing; complete it after the worker's handoff. Do not duplicate a confirmation or final reply already queued for this exact card. A reply on another card does not satisfy this card.` : ''
         },
         tools: (agent, ticket) => ticket ? executorTools(this.toolHost, ticket) : mainTools(this.toolHost, agent) })
@@ -248,7 +250,7 @@ export class Runtime extends Service implements SourceHost {
         } }
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
         cardReplies: {
-          current: ticketId => workerReplyCard(runtime.context({ kind: 'dingtalk', health: [] }), ticketId)?.card_id,
+          has: (ticketId, triggerId) => hasCardBinding(runtime.context({ kind: 'dingtalk', health: [] }), ticketId, triggerId),
           resolve: (id, ticketId) => resolveCardReply(runtime.context({ kind: 'dingtalk', health: [] }), id, ticketId),
           pending: ticketId => pendingCardReplies(runtime.context({ kind: 'dingtalk', health: [] }), ticketId),
           acknowledge: (id, text, ticketId) => {

@@ -38,10 +38,8 @@ export interface SessionsHost {
   tools(agent: Agent, ticket?: Ticket): Tool[]
   /** Current transport obligations, independent of saved team prompt overrides. */
   cardReplyInstructions?(ticket?: Ticket): string
-  /** Bind an external worker delivery to its processing-round card before submitting the message. */
-  bindWorkerDelivery?(ticket: Ticket, requestId: string, text: string, busy: boolean): string
-  /** Capture the worker's current round in a durable report relay before another round can start. */
-  replyCard?(ticketId: string): { card_id: string; ticket_id?: string } | undefined
+  /** Attach the input event's card to each delivery; workers do not own a current-card pointer. */
+  bindWorkerDelivery?(ticket: Ticket, requestId: string, text: string): string
 }
 
 /**
@@ -174,9 +172,7 @@ export class Sessions {
     if (ticket && typeof mode !== 'object' && this.host.bindWorkerDelivery
       && !await this.agentDelivery.holds(result.agent, key(requestId))) {
       authorize?.()
-      const agent = result.agent
-      const busy = agent.status === 'running' || agent.inbox.nextStep.length > 0 || agent.inbox.nextTurn.length > 0
-      text = this.host.bindWorkerDelivery(ticket, requestId, text, busy)
+      text = this.host.bindWorkerDelivery(ticket, requestId, text)
     }
     await this.agentDelivery.send(result.agent, key(requestId), text, mode, this.host.lifetime, authorize, accepted)
   }
@@ -184,18 +180,14 @@ export class Sessions {
   promptedId(requestId: string): MessageId { return messageId(key(requestId)) }
   /** Enqueues a steering relay to the main Session; relays are durable and retried by `Effects` until delivered, at most once per `requestId`. */
   relay(requestId: string, text: string): void {
-    if (this.host.replyCard) {
-      try {
-        const message = JSON.parse(text)
-        if (['worker_report', 'worker_attention'].includes(message.kind) && message.ticket?.ticket_id) {
-          const card = this.host.replyCard(message.ticket.ticket_id)
-          const instructions = message.kind === 'worker_report' && message.trigger_id
-            ? this.host.store.triggers.get(message.trigger_id)?.taskRequest?.replyInstructions : undefined
-          if (card || instructions) text = JSON.stringify({ ...message, ...(card ? { reply_card: card } : {}),
-            ...(instructions ? { reply_instructions: instructions } : {}) })
-        }
-      } catch { /* Non-JSON relays have no worker-card association. */ }
-    }
+    try {
+      const message = JSON.parse(text)
+      if (message.kind === 'worker_report') {
+        const triggerId = message.reply_card?.trigger_id ?? message.answer_to ?? message.trigger_id
+        const instructions = this.host.store.triggers.get(triggerId)?.taskRequest?.replyInstructions
+        if (instructions) text = JSON.stringify({ ...message, reply_instructions: instructions })
+      }
+    } catch { /* Non-JSON relays have no input-event instructions. */ }
     this.host.effects.enqueue('relay', requestId, { text })
   }
   /** Enqueues a durable background notice for injection into the main Session; a new notice with the same `name` replaces a still-waiting notice of that `name`. */
