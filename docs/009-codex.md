@@ -6,7 +6,7 @@ Worker reports still go through `orchestrator_report → reportRelay → main Se
 
 The entry also starts the existing GitHub polling loop after DingTalk connects and stops it on shutdown. Polling uses the original cursors, deduplication and policy gates; unchanged polls do not invoke the model. The GitHub Source settings control the interval (60 seconds by default) and repository observation switches; starting polling does not enable those switches or add group broadcasts.
 
-Optional DingTalk AI receipt and native reply cards display a waiting receipt before model processing and provide a reply button/input on every feedback card. See `cards/README.md`, publish the supplied [template](../cards/dingtalk-superagent.json), and set `DINGTALK_CARD_TEMPLATE_ID` to enable this mode; text mode remains the default.
+Optional DingTalk AI cards display a source receipt before model processing and append agent confirmations and results in the same card. Followups use the client's native quoted reply plus a robot mention, or an explicit task ID. See `cards/README.md`, publish the supplied [template](../cards/dingtalk-superagent.json), and set `DINGTALK_CARD_TEMPLATE_ID` to enable this mode; text mode remains the default.
 
 ## Install and start
 
@@ -107,7 +107,7 @@ The database is `state-codex/orchestrator.sqlite`. Codex thread IDs, durable inb
 ## First-version boundaries
 
 - Only group @ messages enter the Source; private messages and ordinary group messages remain outside scope. All message types are admitted: plain text, rich text, image, audio, video, file and unknown types. Rich text is projected in its original order, and supplied audio transcription/file names are retained. Binary attachments currently produce explicit unparsed-content markers; their native body/references are retained in Source KV, but are not automatically downloaded or interpreted.
-- In text mode, follow up with `@robot #<12-character-ticket-id> ...`. In AI card mode, **回复** prepares a real robot mention and task reference in the group input; add text and send normally. Native input support must be verified in the real client as described in `cards/README.md`. References associate only within their originating group. Native quoted-message association is not implemented.
+- Follow up with `@robot #<12-character-ticket-id> ...`. In AI card mode, the client's native quoted reply can recover the task when the callback includes the robot's task-bearing summary or card text; mention the robot and send normally. Verify desktop and mobile behavior as described in `cards/README.md`; add the task ID explicitly if the client omits that information. References associate only within their originating group.
 - No subagents: Codex multi-agent features are disabled, and no subagent service/tools are exposed.
 - Built-in Codex coding tools use the configured sandbox. Original orchestrator tools keep their original schemas and handlers.
 - Native command events feed the original worker-slot/background-work tracking. Codex's terminal cleanup API operates on a whole thread, so stopping one native background job cleans that thread's background terminals together.

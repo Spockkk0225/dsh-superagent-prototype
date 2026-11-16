@@ -1,5 +1,9 @@
 # dsh-superagent
 
+This repository is the NeuG adaptation of [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype), including the Codex CLI host, DingTalk integration, GitHub App authentication and event handling. The upstream code and MIT license are retained.
+
+**中文安装和使用说明：[README.zh-CN.md](README.zh-CN.md)。**
+
 For Codex CLI + DingTalk using the original Runtime, Store, Executor and tools, see [docs/009-codex.md](docs/009-codex.md).
 
 > **Research prototype for reference only, not an official DeepSeek product.** This code grew out of our team's day-to-day development work, with much of the engineering done by coding agents. Treat it as research code, not production-ready software. It may still contain bugs, and its coding style and engineering practices may be inconsistent. Review and adapt it before using it in your own environment.

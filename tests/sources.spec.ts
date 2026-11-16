@@ -545,7 +545,7 @@ describe('github source', () => {
     expect(h.receive.mock.calls[0]![0]).toMatchObject({ actor: { id: 'carol' }, text: 'APPROVED review of commit abc123', meta: { kind: 'review' } })
     h.store.close()
   })
-  it('reads each PR once per round and takes its end, auto-merge and CI from that read', async () => {
+  it('reads each PR once per round for lifecycle and auto-merge without polling its CI', async () => {
     const h = host()
     h.store.tickets.save({ ...openTicket('t9'), ...pulled(9) })
     h.store.threads.save({ key: 'github:9', ref: { source: 'github', id: '9' }, createdAt: '', lastAt: new Date().toISOString(),
@@ -560,13 +560,14 @@ describe('github source', () => {
     // The notification, the ticket's PR and the subscribed Thread share one read of the PR.
     expect(reads.filter(path => path === 'pulls/9')).toHaveLength(1)
     const facts = () => h.store.threads.get('github:9')!.meta.facts as Record<string, unknown>
-    expect(facts()).toMatchObject({ autoMerge: { label: { zh: '自动合并', en: 'Auto-merge' } }, ci: { value: '1' } })
+    expect(facts()).toMatchObject({ autoMerge: { label: { zh: '自动合并', en: 'Auto-merge' } } })
+    expect(facts()).not.toHaveProperty('ci')
     routes['pulls/9'] = { ...pr, auto_merge: null }
     routes['commits/abc/check-runs'] = { check_runs: [{ name: 'test', status: 'completed', conclusion: 'failure' }] }
     await pollRound(h)
     expect(facts()).not.toHaveProperty('autoMerge')
-    // Only a change after the first look is a Trigger.
-    expect(h.receive.mock.calls.map(([trigger]) => trigger.meta)).toEqual([expect.objectContaining({ ci: true, revision: 1 })])
+    expect(reads.some(path => path.includes('/check-runs') || path.includes('/statuses'))).toBe(false)
+    expect(h.receive).not.toHaveBeenCalled()
     routes['pulls/9'] = { ...pr, state: 'closed', merged: true, merged_at: '2026-09-09T00:00:00Z' }
     await pollRound(h)
     expect(h.store.tickets.get('t9')).toMatchObject({ ended: { outcome: 'merged' } })
@@ -1349,7 +1350,7 @@ describe('observing the GitHub repository', () => {
     repository(h, answers)
     await pollRound(h)
     expect(h.receive).not.toHaveBeenCalled()
-    expect(h.store.get('github-branch-ci')).toEqual({ branch: 'main', failures: ['lint'], revision: 2 })
+    expect(h.store.get('github-branch-ci')).toEqual({ branch: 'main', failures: ['lint'], revision: 2, settled: expect.any(String) })
     h.store.close()
   })
   it('takes in new PRs only from when their switch turned on, apart from when new Issues were', async () => {
@@ -1389,32 +1390,35 @@ describe('observing the GitHub repository', () => {
     expect(lists[1]).toEqual(expect.arrayContaining(['-H', 'If-None-Match: "same"']))
     h.store.close()
   })
-  it('gives each change of the default branch\'s CI its own id, also when one commit fails, passes and fails again', async () => {
+  it('reports stable new checks once per head, ignoring changed conclusions on reported checks', async () => {
     const h = host()
     observe(h, { observeCi: true })
     h.store.set('github-since', at(-24))
     const check = (name: string, conclusion: string) => ({ name, status: 'completed', conclusion })
     const answers = { branch: { sha: 'eee5555', checks: [check('lint', 'success')] } }
     repository(h, answers)
-    await pollRound(h)
+    await pollRound(h); await pollRound(h)
     for (const conclusion of ['failure', 'success', 'failure']) {
       answers.branch = { sha: 'eee5555', checks: [check('lint', conclusion)] }
-      await pollRound(h)
+      await pollRound(h); await pollRound(h)
     }
     const ids = h.receive.mock.calls.map(([trigger]) => trigger.id)
-    expect(ids).toHaveLength(3)
-    expect(new Set(ids).size).toBe(3)
+    expect(ids).toHaveLength(1)
+    answers.branch.checks.push(check('nightly', 'failure'))
+    await pollRound(h); await pollRound(h)
+    expect(new Set(h.receive.mock.calls.map(([trigger]) => trigger.id)).size).toBe(2)
+    expect(h.receive.mock.calls[1]![0]).toMatchObject({ meta: { checks: { checks: [check('nightly', 'failure')] } } })
     // Switched off and on again, the CI starts from a new first look, and its ids keep counting.
     observe(h, {})
     await pollRound(h)
     observe(h, { observeCi: true })
     await pollRound(h)
     answers.branch = { sha: 'eee5555', checks: [check('lint', 'success')] }
-    await pollRound(h)
-    expect(new Set(h.receive.mock.calls.map(([trigger]) => trigger.id)).size).toBe(4)
+    await pollRound(h); await pollRound(h)
+    expect(new Set(h.receive.mock.calls.map(([trigger]) => trigger.id)).size).toBe(3)
     h.store.close()
   })
-  it('tells of the default branch\'s CI when its failed checks change and once it passes again, after a first look', async () => {
+  it('waits for completed CI to settle twice before reporting failures or success on a new head', async () => {
     const h = host()
     observe(h, { observeCi: true })
     h.store.set('github-since', at(-24))
@@ -1425,15 +1429,20 @@ describe('observing the GitHub repository', () => {
     await pollRound(h)
     expect(texts()).toEqual([])
     answers.branch = { sha: 'bbb2222', checks: [check('lint', 'failure'), check('e2e', null)] }
-    await pollRound(h)
+    await pollRound(h); await pollRound(h)
+    expect(texts()).toEqual([])
     answers.branch = { sha: 'bbb2222', checks: [check('lint', 'failure'), check('e2e', 'success')] }
+    await pollRound(h)
+    expect(texts()).toEqual([])
     await pollRound(h)
     // A rerun that still runs is no recovery yet; the recovery is told once every check passes.
     answers.branch = { sha: 'ccc3333', checks: [check('lint', null), check('e2e', null)] }
     await pollRound(h)
     answers.branch = { sha: 'ccc3333', checks: [check('lint', 'success'), check('e2e', 'success')] }
     await pollRound(h)
-    expect(texts()).toEqual(['CI failed 1/2 on main at bbb2222: lint; 1 still running', 'CI passed 2/2 on main at ccc3333'])
+    expect(texts()).toHaveLength(1)
+    await pollRound(h)
+    expect(texts()).toEqual(['CI failed 1/2 on main at bbb2222: lint', 'CI passed 2/2 on main at ccc3333'])
     expect(h.receive.mock.calls[0]![0]).toMatchObject({ human: false, actor: { id: '' }, threads: [{ source: 'github', id: 'ci:main' }],
       meta: { ci: true, branch: 'main', sha: 'bbb2222' }, url: 'https://github.com/acme/widgets/commit/bbb2222' })
     expect(h.receive.mock.calls[0]![0].text).toContain('Read github/commits/bbb2222/checks for every check.')
