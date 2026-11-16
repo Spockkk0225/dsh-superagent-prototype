@@ -25,6 +25,20 @@ function serve(runtime: Partial<Record<keyof HttpHost, unknown>>, host = '127.0.
   }
 }
 
+it('accepts only a nonempty bounded prompt on the existing protected local API', async () => {
+  const prompts: string[] = []
+  const call = serve({ machine: { promptMaxChars: { get: () => 100 } },
+    submitRequest: (prompt: string) => { prompts.push(prompt); return { trigger_id: 'request:1', status: 'stored' } } })
+  expect(await call('POST', 'requests', { prompt: '  Summarize CI  ' })).toEqual({ status: 200,
+    body: { trigger_id: 'request:1', status: 'stored' } })
+  for (const body of [{}, { prompt: '' }, { prompt: '  ' }, { prompt: 1 }, { prompt: 'x'.repeat(101) },
+    { prompt: 'Run', source: 'dingtalk' }, { prompt: 'Run', output: 'another-group' }]) {
+    expect(await call('POST', 'requests', body)).toMatchObject({ status: 400 })
+  }
+  expect(await call('POST', 'requests', { prompt: 'Run' }, { 'x-orchestrator-request': undefined })).toMatchObject({ status: 403 })
+  expect(prompts).toEqual(['Summarize CI'])
+})
+
 it('answers each kind of failure with its own status', async () => {
   const saves: unknown[] = []
   const call = serve({

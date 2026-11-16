@@ -291,6 +291,7 @@ const ticketOf = (id: string) =>
 const SourceSave = z.object({ enabled: z.boolean(), config: z.unknown() })
 
 const ROUTES: { [K in keyof Api]: Route<K> } = {
+  'POST requests': { body: true, answer: () => ({ trigger_id: 'request:local', status: 'stored' }) },
   'GET state': { answer: stateView },
   'GET overview': { answer: overviewView },
   'GET search': { query: ['q'], answer: async ({ query }) => {

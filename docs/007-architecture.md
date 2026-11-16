@@ -295,6 +295,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/harness/codex.ts` | Translates host session, inbox, persistence and agent-event services into Codex calls; binds original role tools and prompts |
 | `src/harness/codex-rpc.ts` | Codex app-server stdio RPC, persisted thread/message IDs, turn start/steer/resume/interrupt and dynamic-tool dispatch |
 | `src/sources/dingtalk.ts` | DingTalk Stream group-mention Source for all message types, rich-text normalization and reply channel, registered with the original SourceRegistry |
+| `src/sources/request.ts` | Local HTTP request Source and operator-request Trigger translation; replies use the configured default DingTalk group |
 | `src/sources/dingtalk-cards.ts` | Optional AI waiting receipts and feedback cards; durable delivery and native group-input reply parameters |
 | `src/deployment.ts` | The plugin `Config` and `Machine`; `resolveDeployment` and `resolveFeishuBot` read the repository and the accounts from the Source settings, each CLI run as Executor shells run it; `SETUP_FIELDS` lists the Source fields setup reads. The code names no person, account or organization |
 | `src/setup.ts` | Setup problems: `SetupError`, with a code, the place that fixes it and the English text the log, the main Session and the panel share |
@@ -421,6 +422,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/github-app.spec.ts` | App JWT signatures, concurrent token refresh, setup validation and App credentials across CLI and Git helper invocations |
 | `tests/github-admins.spec.ts` | Startup admin export pagination, filtering and failure behavior |
 | `tests/github-events.spec.ts` | Directed App requests, main branch CI polling, persistent PR updates and the existing DingTalk receipt/result card flow |
+| `tests/request.spec.ts` | Local request intake, default output routing, mandatory card replies and worker card binding |
 | `tests/feishu-read.spec.ts`, `tests/github-read.spec.ts` | Feishu and GitHub reads |
 | `tests/admission-context.spec.ts`, `tests/feishu-image.spec.ts` | The Thread window of assessments, and Feishu image reads |
 | `tests/assessment.spec.ts` | What the MasterAssessor keeps per Eval, and when it lets go |

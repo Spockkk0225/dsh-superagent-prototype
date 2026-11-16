@@ -132,7 +132,8 @@ export function subagentRuntime(agents: Map<string, FakeAgent>) {
 }
 
 /** @param seed - writes to the database before the Runtime opens it, such as records an earlier version stored. */
-export async function startRuntime(seed?: (store: Store) => void, notificationGroup?: string, received?: (trigger: Trigger) => void) {
+export async function startRuntime(seed?: (store: Store) => void, notificationGroup?: string, received?: (trigger: Trigger) => void,
+  workerDelivery?: ConstructorParameters<typeof Runtime>[5]) {
   const directory = mkdtempSync(join(tmpdir(), 'orchestrator-host-'))
   const AGENT = join(directory, 'agent-gh'), BOT = join(directory, 'lark-bot')
   const repository = { default_branch: 'master', permissions: { push: true } }
@@ -249,7 +250,7 @@ export async function startRuntime(seed?: (store: Store) => void, notificationGr
   seeded.saveSettings(SettingsSchema.parse({ ...seeded.settings(), sources }))
   seed?.(seeded)
   seeded.close()
-  const runtime = new Runtime(ctx, testMachine({ stateDir: directory }), vi.fn(), notificationGroup, received)
+  const runtime = new Runtime(ctx, testMachine({ stateDir: directory }), vi.fn(), notificationGroup, received, workerDelivery)
   await runtime.ready
   runtime.sources.register(feishuKind); runtime.sources.register(githubKind)
   const settings = runtime.store.settings()

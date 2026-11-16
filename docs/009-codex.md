@@ -47,6 +47,21 @@ These steps start a fresh installation. Runtime state, credentials, ticket workt
 
 ## Settings and state
 
+### Local request delivery
+
+Scripts can submit operator-authored instructions through the existing loopback-only HTTP server. The request body contains only `prompt`; each successful call creates an independent request and returns its `trigger_id`. No scheduler runs inside the agent.
+
+```bash
+curl --fail-with-body http://127.0.0.1:3082/orchestrator/api/requests \
+  -H 'X-Orchestrator-Request: 1' \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Investigate CI failures on main from the past day and summarize their causes."}'
+```
+
+Use the configured web-server port if it differs from 3082. The endpoint retains the management API's loopback, Host, Origin and custom-header checks; it adds no public listener or remote authentication. Local scripts act as the local operator: the independent `request` Source defaults to allowing its `local` actor, and ordinary policy and main-agent routing still apply. Disabling that Source stops intake; its allowed list can be restricted in Policy.
+
+Set `DINGTALK_GITHUB_NOTIFY_CONVERSATION_ID` to the default reply group and keep the DingTalk Source enabled. Requests fail if this output is missing. With the existing DingTalk card template configured, intake creates the same pending card as a group mention; initial agent confirmation, worker card binding, explicit final replies and missing-reply reminders use the existing card lifecycle. The HTTP response is only a receipt, not the agent's confirmation or final reply. Manual scripts and external cron jobs use the same endpoint. Repeating a POST creates a new request.
+
 ### GitHub App polling and DingTalk notifications
 
 App mode discovers assignments to the agent, individual PR review requests, and mentions in repository comments without the user notifications API or the repository-wide observe switches. Assignment and review-request actors still pass the existing static allowed list, populated from repository admin users at each Codex startup. Review requests have independent event threads; a robot-created PR bound to a ticket keeps its existing subscriptions, including unmentioned comments, reviews and closure after a ready report. PR CI is not polled or dispatched; workers may inspect checks on demand but never wait for them.

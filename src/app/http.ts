@@ -53,6 +53,7 @@ export interface HttpHost {
   checkSetup(): void
   requestPass(): void
   models(): Promise<ModelCatalog>
+  submitRequest(prompt: string): { trigger_id: string; status: 'stored' }
 }
 /**
  * Represents a client-facing 400 or 404 error raised during management route parsing or lookup.
@@ -153,6 +154,10 @@ function routes(runtime: HttpHost): Routes {
   const ticket = (id: string) => { if (!store.tickets.get(id)) throw new RouteError(404, 'Ticket not found'); return id }
   const promptBody = (input: { body: (maxBytes?: number) => Promise<unknown> }) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096)
   return {
+    'POST requests': async ({ body }) => {
+      const request = z.object({ prompt: z.string().trim().min(1).max(runtime.machine.promptMaxChars.get()) }).strict().parse(await body())
+      return runtime.submitRequest(request.prompt)
+    },
     'GET state': () => stateView(runtime),
     'GET overview': () => overview(views(runtime), runtime.health, policyVersion(store.settings()),
       executorLoad(store, runtime.executor.activeCount()), runtime.setupProblem ?? runtime.feishuProblem),

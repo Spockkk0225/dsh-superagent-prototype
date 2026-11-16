@@ -18,6 +18,7 @@ interface Paged { offset?: number; limit?: number }
 type Delivery = 'injected' | 'pending'
 
 export interface Api {
+  'POST requests': { body: { prompt: string }; response: { trigger_id: string; status: 'stored' } }
   'GET state': { response: StateView }
   'GET overview': { response: OverviewView }
   'GET search': { query: { q: string }; response: SearchView }

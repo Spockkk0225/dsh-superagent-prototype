@@ -16,6 +16,7 @@ import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
 import { allowedSender, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
+import { requestKind, requestTrigger } from '../sources/request.ts'
 import { acknowledgeCard, bindDingTalkReply, cardAcknowledgementId, githubMentionReplies, pendingCardReplies, remindCardReply, replyToCard, resolveCardReply, workerReplyCard } from '../sources/dingtalk-cards.ts'
 import { Commands } from '../infra/commands.ts'
 import type { Deployment, Machine } from '../deployment.ts'
@@ -86,7 +87,7 @@ export class Runtime extends Service implements SourceHost {
   private readonly toolHost: MainToolsHost & ExecutorToolsHost
   /** Non-zero while a main-Session tool is executing an Engine command, suppressing self-triggered domain event notices. */
   private quiet = 0
-  constructor(ctx: Context, readonly machine: Machine, restart: () => void, notificationGroup?: string,
+  constructor(ctx: Context, readonly machine: Machine, restart: () => void, private readonly notificationGroup?: string,
     received?: (trigger: Trigger) => void,
     workerDelivery?: (ticketId: string, deliveryId: string, triggerId: string, busy: boolean) => { card_id: string; ticket_id: string } | undefined) {
     super(ctx, 'orchestrator')
@@ -116,6 +117,10 @@ export class Runtime extends Service implements SourceHost {
           .catch(() => { /* sync() records its failure in health. */ })
         return () => {}
       })
+      this.disposers.push(sources.register(requestKind))
+      const initial = store.settings()
+      if (!initial.policy.sources.request) store.saveSettings({ ...initial,
+        policy: { ...initial.policy, sources: { ...initial.policy.sources, request: { allowed: [{ id: 'local' }] } } } })
       const links: LinkHost = { store, links: this.sourceLinks, commands, sources, lifetime: this.lifetime }
       const link = (trigger: Trigger, signal?: AbortSignal) => sourceLink(links, trigger, signal)
       const environment = (ticket: Ticket) => this.ticketEnvironment(ticket)
@@ -229,6 +234,7 @@ export class Runtime extends Service implements SourceHost {
           return store.atomic(() => {
             const result = passes.receive(incoming)
             if (result === 'stored' && incoming.taskRequest) received?.(incoming)
+            if (result === 'stored' && incoming.source === 'request') received?.(incoming)
             if (result === 'stored' && incoming.source === 'github') {
               sessions.relay(`github-event:${incoming.id}`, JSON.stringify({ kind: 'github_event',
                 ...triggerMessage(incoming, incoming.url ? { source_url: incoming.url } : {}),
@@ -319,7 +325,20 @@ export class Runtime extends Service implements SourceHost {
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
-      checkSetup: () => { setup.check() }, requestPass: () => { passes.request() }, models: () => this.ctx.sessionController.modelCatalog() }
+      checkSetup: () => { setup.check() }, requestPass: () => { passes.request() }, models: () => this.ctx.sessionController.modelCatalog(),
+      submitRequest: prompt => runtime.submitRequest(prompt) }
+  }
+  /** Local scripts submit operator instructions; the existing policy, routing and card lifecycle still apply. */
+  submitRequest(prompt: string): { trigger_id: string; status: 'stored' } {
+    if (!this.configured()) throw new Error('Orchestrator setup is not complete')
+    if (!this.notificationGroup || !this.sources.instance('dingtalk')?.enabled) {
+      throw new Error('Default DingTalk output is not configured or enabled')
+    }
+    if (!this.sources.instance('request')?.enabled) throw new Error('Local request Source is disabled')
+    const trigger = requestTrigger(prompt, this.notificationGroup)
+    const result = this.context(requestKind).receive(trigger)
+    if (result !== 'stored') throw new Error('Local request was not accepted')
+    return { trigger_id: trigger.id, status: 'stored' }
   }
   /** Idempotent stop; concurrent or repeated calls share the same shutdown promise. */
   stop(): Promise<void> { return this.stopping ??= this.shutdown() }
