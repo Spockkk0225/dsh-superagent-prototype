@@ -96,7 +96,9 @@ export class Tickets extends EnginePart {
     const follows = ticket.follows ?? []
     const own = follows.filter(item => item.own)
     const counted = own.length ? own : follows
-    if (!counted.length || counted.some(item => !item.closed)) return undefined
+    // Old GitHub close records must not end resumed work; only a merge is terminal for a PR.
+    if (!counted.length || counted.some(item => !item.closed
+      || item.thread.startsWith('github:') && item.closed.outcome === 'closed')) return undefined
     return counted.map(item => item.closed!).sort((a, b) => a.at.localeCompare(b.at)).at(-1)
   }
   /**

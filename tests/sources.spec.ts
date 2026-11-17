@@ -400,7 +400,22 @@ describe('github source', () => {
     expect(ciSummary({ ...failing, checks: [check('unit', 'completed', 'success')] }, 'PR #9',
       read)).toMatch(/^CI passed 1\/1 on PR #9 at abc1234/)
   })
-  it('binds a PR to the unique live ticket on its branch and ends tickets when the PR closes', async () => {
+  it.each([false, true])('ignores an unmerged PR close and delivers the ready result (legacy close record: %s)', async legacy => {
+    const h = host()
+    const at = '2026-09-02T00:00:00Z'
+    h.store.tickets.save({ ...openTicket('t-close'), channels: [githubChannel(9)],
+      assignments: [{ id: 'retry', state: 'running', createdAt: '2026-09-03T00:00:00Z' }],
+      follows: [{ thread: 'github:9', own: true, ...(legacy ? { closed: { at, outcome: 'closed' as const } } : {}) }] })
+    expect(await observePull(h, endedPull(9, at, false))).toBe(true)
+    expect(h.store.tickets.get('t-close')!.ended).toBeUndefined()
+    h.engine.report('t-close', { state: 'ready', summary: 'Workflow dispatch returned 403; no test run started.' })
+    expect(h.store.tickets.get('t-close')!.ended).toBeUndefined()
+    expect(h.engine.reply({ purpose: 'result', ticketId: 't-close', text: 'Workflow dispatch returned 403; no test run started.' }))
+      .toMatchObject({ status: 'pending' })
+    expect(h.executor.stop).not.toHaveBeenCalled()
+    h.store.close()
+  })
+  it('binds a PR to the unique live ticket on its branch and ends tickets when the PR merges', async () => {
     const h = host()
     const decisionId = 'd'
     const request = feishuTrigger({ message_id: 'om_1', chat_id: 'oc_1', chat_type: 'group', sender_id: MEMBER, sender_type: 'user', content: '@bot 修一下标题', create_time: '1', mentions: [{ id: 'ou_bot' }] }, 'ou_bot', 'cli_bot')!
@@ -472,9 +487,9 @@ describe('github source', () => {
     const request = feishuTrigger({ message_id: 'om_2', chat_id: 'oc_1', chat_type: 'group', sender_id: MEMBER, sender_type: 'user', content: '@bot fix the title', create_time: '1', mentions: [{ id: 'ou_bot' }] }, 'ou_bot', 'cli_bot')!
     h.store.triggers.save(request)
     h.store.tickets.save({ id: 't2', title: 'two', decisionId: 'd2', mandate: { strength: 'explicit', policyVersion: '', basis: { via: 'listed' }, actor: { source: 'feishu', id: MEMBER }, scope: '' }, channels: [{ source: 'feishu', thread: 'feishu:oc_1', address: { chatId: 'oc_1', messageId: 'om_2' } }], assignments: [], inputs: [], undelivered: [], createdAt: '', updatedAt: '', ...pulled(12), origin: { triggerId: request.id, triggerIds: [request.id] } })
-    expect(await observePull(h, endedPull(12, '2026-09-02T00:00:00Z', false))).toBe(true)
+    expect(await observePull(h, endedPull(12, '2026-09-02T00:00:00Z'))).toBe(true)
     expect(pullEndNotices(h.store.tickets.get('t2')!, request.text, 'acme/widgets'))
-      .toEqual([expect.objectContaining({ text: '[PR #12](https://github.com/acme/widgets/pull/12) was closed without merging.' })])
+      .toEqual([expect.objectContaining({ text: '[PR #12](https://github.com/acme/widgets/pull/12) has merged.' })])
     h.store.close()
   })
   it('polls subscribed PR threads since their checkpoint and skips the bot\'s own comments', async () => {

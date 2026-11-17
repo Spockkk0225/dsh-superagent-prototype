@@ -76,10 +76,11 @@ function bind(ctx: SourceContext, ticketId: string, pr: Pull, own: boolean): voi
   })
 }
 /**
- * Reports a merged or closed PR once to the open tickets that follow it, whose end the core decides.
+ * Reports a merged PR once to the open tickets that follow it, whose end the core decides.
  * Their subscription to the PR stays so a later human comment there resumes the ticket.
  */
 function closePull(ctx: SourceContext, pr: Pull): void {
+  if (!pr.merged) return
   if (!ctx.tickets.open().some(ticket => pullsOf(ticket, true).includes(pr.number))) return
   const at = pr.merged_at ?? pr.closed_at ?? new Date().toISOString()
   ctx.tickets.threadClosed({ source: SOURCE, id: String(pr.number) }, pr.merged ? 'merged' : 'closed', at)
