@@ -116,7 +116,7 @@ The core's codes, such as `timeout`, `policyChanged`, `routed` and `startedTicke
 
 A Ticket keeps each fact once. It is open while it has no `ended`, which records when, by whom, why and with what outcome it ended; what it last said is its latest Assignment Report (`latestReport`); and its Executor Session is named after it (`workerSessionId` in `src/executor/dsh.ts`).
 
-Its fields are typed: `origin`, the admissible Trigger that gave its Eval's batch its strength and the batch itself (`triggerId`, `triggerIds`); `execution`, what the Executor chose (`name`, `directory` and `assignment`); `delivery`, the last failed Input delivery (`error`, `at`), until a delivery succeeds, a new Assignment starts or the Ticket ends; and `follows`, the Threads a Source made it follow, each `{thread, own, closed?}`: `own` when the Ticket opened it, and `closed` with `at` and `outcome` once it closed. Tickets alone writes `follows`; the GitHub Source reads its pull requests with `pullsOf` and `pullOf` (`src/sources/github-pull.ts`).
+Its fields are typed: `origin`, the admissible Trigger that gave its Eval's batch its strength and the batch itself (`triggerId`, `triggerIds`); `execution`, what the Executor chose (`name`, `directory` and `assignment`); `delivery`, the last failed Input delivery (`error`, `at`), until a delivery succeeds, a new Assignment starts or the Ticket ends; and `follows`, the Threads a Source made it follow, each `{thread, own, closed?}`: `own` when the Ticket opened it, and `closed` with `at` and `outcome` once it closed. Tickets alone writes `follows`; the GitHub Source reads its pull requests with `pullsOf` and `pullOf` (`src/sources/github.ts`).
 
 An Input that carries a Trigger records whether a person wrote it, which `waitsForPerson` reads. A Thread also lists in `context` the subscribed Tickets that follow it only for context, and counts in `expired` the Evals of its queued Triggers that expired in a row; an Evaluation records its `primary` Trigger and when its candidate was `delivered`.
 
@@ -249,7 +249,7 @@ Each model request binds the Session to the current prompt revision. The revisio
 | `src/app/tools/main.ts`, `src/app/tools/executor.ts` | Tool arguments of the main Session and the Executor Sessions into calls of the core classes, and their results into cards |
 | `src/app/http.ts`, `src/app/views/`, `src/app/api.ts` | HTTP requests into calls, and Store reads into the panel's views; `api.ts` types every route for the panel |
 | `src/app/resources.ts`, `src/app/links.ts`, `src/app/cards.ts` | Resource names into reads, source messages into links, records into compact cards for models |
-| `src/sources/github*.ts`, `src/sources/feishu*.ts`, `src/sources/poll.ts` | GitHub and Feishu payloads into Triggers and Thread facts, and messages into CLI calls |
+| `src/sources/github.ts`, `src/sources/feishu.ts`, `src/sources/poll.ts` | GitHub and Feishu payloads into Triggers and Thread facts, and messages into CLI calls |
 | `src/deployment.ts`, `src/setup.ts`, `src/infra/` | Setup probes and problems, CLI transport, the agent's process environment |
 
 ## Dependency rules
@@ -297,10 +297,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/harness/codex-rpc.ts` | Codex app-server stdio RPC, persisted thread/message IDs, turn start/steer/resume/interrupt and dynamic-tool dispatch |
 | `src/harness/project-planner.ts` | Codex, Qwen Code and Qoder CLI adapters for bounded, structured meeting planning |
 | `src/harness/robot-agents.ts` | Local CLI discovery and planning provider selection |
-| `src/sources/dingtalk.ts` | DingTalk Stream group-mention Source for all message types, rich-text normalization and reply channel, registered with the original SourceRegistry |
+| `src/sources/dingtalk.ts` | DingTalk provider facade: Stream, rich text, group intake, member identity, Markdown, AI cards and original-channel reply provenance |
 | `src/sources/request.ts` | Local HTTP request Source and operator-request Trigger translation; replies use the configured default DingTalk group |
-| `src/sources/dingtalk-cards.ts` | Optional AI waiting receipts and feedback cards; durable delivery and native group-input reply parameters |
-| `src/sources/dingtalk-projects.ts` | Maps group messages and member identities to the shared meeting workflow and supplies DingTalk reply instructions |
 | `src/deployment.ts` | The plugin `Config` and `Machine`; `resolveDeployment` and `resolveFeishuBot` read the repository and the accounts from the Source settings, each CLI run as Executor shells run it; `SETUP_FIELDS` lists the Source fields setup reads. The code names no person, account or organization |
 | `src/setup.ts` | Setup problems: `SetupError`, with a code, the place that fixes it and the English text the log, the main Session and the panel share |
 | `src/policy.ts` | The Policy: the settings schemas by block, the Policy version, the gate and Mandate revalidation |
@@ -369,8 +367,9 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/repository-delivery.ts` | Discovers current linked resources and queries provider-independent merged code evidence |
 | `src/app/project-history.ts` | Transactional mutation audit, baseline import and a paginated view joining events, Agent actions and remote receipts |
 | `src/client/project-history.tsx` | Project history section with causes, Agent decisions, synchronization retry, remote evidence and check appointments |
+| `src/sources/repository-source.ts` | Abstract repository-source template owning resource deduplication, binding cursors, failure isolation and durable fact/feedback publication |
 | `src/sources/repository-events.ts` | Provider-independent Issue and code-change fact definitions and runtime resource contracts |
-| `src/sources/github-project-events.ts` | Reads exactly linked repository resources and produces normalized facts without converting them into new work requests |
+| `src/sources/github.ts` | GitHub provider facade: schemas, normalized events, repository reads, PR feedback, legacy subscriptions, lifecycle, idempotent comments and reply addressing |
 | `src/app/project-progress.ts` | Publishes task readiness from transactional aggregate changes; wakes the shared Agent from readiness, blockers and durable scheduled checks, replacing pass-based project dispatch |
 | `src/app/project-events.ts` | Ordered SQLite project event queue, source registration, JSON configuration, and atomic reactions |
 | `src/app/project-notifications.ts` | Project group notices and reviewer account resolution shared by event and dependency handlers |
@@ -400,20 +399,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/registry.ts` | `SourceRegistry` |
 | `src/sources/host.ts` | `SourceHost`, `SourceContext`, `Health`, `health` and the fixed health texts |
 | `src/sources/poll.ts` | What GitHub and Feishu polling share: `POLL_HORIZON_MS`, `polled`, `cursorAt`, and `pollThreads`, which keeps a failure on its Thread as `pollError` |
-| `src/sources/github.ts` | The GitHub kind and plugin entry, exported as `./github-watch`: a poll round of notifications, the pull requests of open Tickets with their CI, and subscribed Threads |
-| `src/sources/github-trigger.ts` | GitHub comments, reviews, Issue bodies and CI changes as Triggers, and GitHub addresses |
-| `src/sources/github-repositories.ts` | Deduplicates configured and project-bound GitHub repositories and shares the repository stream enablement check |
-| `src/sources/github-events.ts` | App timeline assignments and independent review requests |
-| `src/sources/github-pull.ts` | The pull request rules: which pull requests a Ticket follows (`claimPull`, `observePull`), the closes it reports to the Engine, and `pullEndNotices`, the chat notice of a Ticket that ended merged or closed |
-| `src/sources/github-channel.ts` | The GitHub Channel: comments and review thread replies, `sent` or `gone` |
-| `src/sources/github-read.ts` | CI snapshots, repository reads, the `github/` resources, and `githubThreadContext`: an Issue's or pull request's conversation by page |
-| `src/sources/feishu.ts` | The Feishu kind and plugin entry, exported as `./feishu-watch` |
-| `src/sources/feishu-trigger.ts` | Feishu messages as Triggers, by one rule for live events, history pages and topic pages |
-| `src/sources/feishu-loops.ts` | The Feishu loops: the event consumer, history recovery, chat names and polling of subscribed topics |
-| `src/sources/feishu-channel.ts` | The Feishu Channel: topic replies, `sent` or `gone` |
-| `src/sources/feishu-read.ts` | The `feishu/` reads of a Trigger's message, its root, parent and topic, and `feishuThreadContext`, which gives them to assessments with their images |
+| `src/sources/feishu.ts` | Feishu provider facade: schemas, live stream, backfill, thread context, images, replies, source configuration and policy |
 | `src/sources/admission-context.ts` | The bounded window an assessment starts from: the first pages of a Trigger's Thread, read through its kind, and the messages around the Trigger |
-| `src/sources/feishu-image.ts` | Reads a Feishu message's image as an attachment for the assessing Session |
 | `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel and the page in DeepSeek Harness's Plugin Manager |
 | `src/client/app.tsx` | The panel: header, search, glossary, tabs and the page of the current route |
 | `src/client/provider.tsx` | What every page reads from its host: copy, calls, navigation, notices, the state poll, and `restart`, which reads the state quickly while dsh-superagent restarts |
@@ -461,6 +448,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/projects.spec.ts` | Project management routes, execution dispatch and follow-ups, dependency checks, GitHub ticket links and Mission Control import |
 | `tests/project-events.spec.ts` | Event ordering, idempotency, JSON configuration, rollback, wakeups, restart recovery, and independent effects |
 | `tests/project-agent.spec.ts` | Unified project-message intake, tool execution, Issue linking, rollback, stale proposals, authorization, duplicate delivery, restart recovery and bounded failures |
+| `tests/repository-feedback.spec.ts` | PR feedback through the real queue, Agent tool routing, original-worker replies, identity, code versions and recovery |
 | `tests/project-repository.spec.ts` | PR/report arrival ordering, version guards, Issue acceptance authorization, uncertain writes, retries and linked-object polling |
 | `tests/project-history.spec.ts` | Causal history joins, stable pagination, transactional rollback and baseline migration across database reopen |
 | `tests/project-progress.spec.ts` | Event-driven autonomous follow-up, dependency acceptance, original-ticket continuation, timer delivery/recovery, stale-event revocation, bounded tools and configuration |

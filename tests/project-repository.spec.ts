@@ -14,7 +14,7 @@ import { currentReview } from '../src/app/project-deliveries.ts'
 import { repositoryFactKey } from '../src/app/repository-delivery.ts'
 import { issueCloseRequested } from '../src/app/project-repository.ts'
 import { changeObserved, issueObserved } from '../src/sources/repository-events.ts'
-import { pollProjectFacts } from '../src/sources/github-project-events.ts'
+import { pollProjectFacts } from '../src/sources/github.ts'
 import { CliError } from '../src/infra/commands.ts'
 import { startRuntime, type Host } from './fixtures/host.ts'
 import { deferred } from './fixtures/async.ts'
@@ -174,7 +174,7 @@ it('polls linked objects through repository-scoped commands and deduplicates rep
     head: { sha: 'head' }, base: { ref: 'main' }, merge_commit_sha: 'merge' } : { state: 'open', html_url: url, updated_at: '2026-11-18T04:00:00.000Z' })
   const ctx = h.runtime.context({ kind: 'github', health: ['github'] })
   const original = h.runtime.commands.forRepository
-  vi.mocked(original).mockReturnValue({ api, withSignal: () => ({ api }) } as never)
+  vi.mocked(original).mockReturnValue({ api, withSignal: () => ({ api, pages: vi.fn().mockResolvedValue([]) }) } as never)
   await pollProjectFacts(ctx); await pollProjectFacts(ctx); await h.runtime.idle()
   expect(h.runtime.projectEvents.list({ projectId: id }).filter(event => [changeObserved.type, issueObserved.type].includes(event.type))).toHaveLength(2)
 })
@@ -233,4 +233,16 @@ it('recovers an uncertain remote write across a full SQLite reopen without a sec
     expect(patches).toBe(1)
     expect(new Projects(store).detail(project.id).tasks[0]?.status).toBe('done')
   } finally { await effects.drain(); store.close(); rmSync(directory, { recursive: true, force: true }) }
+})
+
+it('supersedes the pending code review when new repository facts invalidate its commit snapshot', async () => {
+  const {h,id,task,projects,fact,submit}=await pilot('pull-request')
+  fact('merged');await h.runtime.idle();await submit()
+  const review=currentReview(projects.detail(id).tasks[0]!)!
+  expect(review.status).toBe('pending')
+  fact('open','2026-11-18T04:05:00.000Z',{head:'new-head'});await h.runtime.idle()
+  const current=projects.detail(id).tasks[0]!
+  expect(current.status).toBe('in-progress')
+  expect(current.reviews?.find(item=>item.id===review.id)?.status).toBe('superseded')
+  expect(await h.api('POST',`projects/${id}/tasks/${task.id}/reviews/${review.id}`,{messageId:'old-commit-acceptance',outcome:'accepted',reason:'Old commit'})).toMatchObject({status:409})
 })

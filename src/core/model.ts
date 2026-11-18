@@ -35,6 +35,8 @@ export interface Trigger {
   at: string
   text: string
   channel?: ChannelRef
+  /** Preserved native reply destination when an application also presents the event in another channel. */
+  originalChannel?: ChannelRef
   url?: string
   /** Source-native details for adapters; the core never interprets them. */
   meta: Record<string, unknown>

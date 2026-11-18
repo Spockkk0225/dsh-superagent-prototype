@@ -38,6 +38,9 @@ export interface SourceContext {
   configured(): boolean
   projectRepositories?(): { repository: string; since: string }[]
   projectResources?(): import('./repository-events.ts').ProjectRepositoryTarget[]
+  /** Exact automation output provenance, for echo suppression without treating a shared user account as a bot. */
+  outgoingMessage?(id: string): { source: string; text: string } | undefined
+  originalChannel?(trigger: Trigger): ChannelRef | undefined
   /** Setup problem keeping this Source's account from running; only the Feishu bot check reports one. */
   readonly problem?: SetupProblem | undefined
   /** Returns a Source's configuration while enabled, or undefined while disabled or uninstalled. */

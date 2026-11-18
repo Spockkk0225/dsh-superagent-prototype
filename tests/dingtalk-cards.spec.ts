@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi, type Mock } from 'vitest'
 import { DWClient, TOPIC_ROBOT } from 'dingtalk-stream'
 import { DingTalk, dingTalkKind, dingTalkRoute, dingTalkTrigger } from '../src/sources/dingtalk.ts'
-import { DingTalkCards, receiptId } from '../src/sources/dingtalk-cards.ts'
+import { DingTalkCards, receiptId } from '../src/sources/dingtalk.ts'
 import type { SourceContext } from '../src/sources/host.ts'
 import type { OutboundMessage, Trigger } from '../src/core/index.ts'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -12,7 +12,7 @@ import { Store } from '../src/app/store.ts'
 import { Effects } from '../src/app/effects.ts'
 import { HealthBoard } from '../src/infra/health.ts'
 import { ProjectPlanning } from '../src/app/project-planning.ts'
-import { dingTalkProjectIntake, dingTalkProjects } from '../src/sources/dingtalk-projects.ts'
+import { dingTalkProjectIntake, dingTalkProjects } from '../src/sources/dingtalk.ts'
 
 let context: SourceContext, origin: Trigger, cards: DingTalkCards
 let http: ReturnType<typeof vi.fn>, notify: Mock<(message: OutboundMessage) => void>

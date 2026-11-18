@@ -14,6 +14,7 @@ export function projectResources(store: Store): ProjectRepositoryTarget[] {
     const detail = projects.detail(project.id)
     return detail.tasks.filter(task => task.status !== 'cancelled').map(task => ({ projectId: project.id, taskId: task.id,
       repository: project.repository!, issueUrl: task.issueUrl, ticketId: task.ticketId ?? undefined, deliveryVersion: task.deliveryVersion ?? 0,
+      since: task.executionStartedAt ?? task.createdAt,
       pullUrls: [...new Set([...(task.pullRequestUrl ? [task.pullRequestUrl] : []),
         ...detail.tickets.filter(ticket => ticket.id === task.ticketId).flatMap(ticket => ticket.pullUrls)])] }))
   })

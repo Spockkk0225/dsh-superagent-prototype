@@ -113,3 +113,35 @@ API 结果重新写入有序队列的内部 `issue.sync.result`，看板区分 p
 关闭本事件为 false，新的关闭请求显示 ignored。尚未发送的动作也重验开关。回执属于事实，内部结果事件不受用户开关阻断；不能关闭回执处理来制造成功状态。
 
 迁移不重放历史验收，没有批量补关 Issue。测试包括超时已写入、权限失败后重试、发送前重开、旧版本及不同仓库对象。真实 API 语义见 [GitHub Issue 更新文档](https://docs.github.com/en/rest/issues/issues#update-an-issue)。
+
+
+## code.feedback.received · 代码讨论与评审
+
+GitHub 默认开启，类别 comments。普通评论、代码行线程和 Review（包括没有正文的 Approve/Request changes）由 GithubSource 转为同一反馈契约，进入项目有序队列。定义、默认描述和开关在 [GitHub 配置](../../config/events/github.defaults.json)中维护。
+
+原文、真实作者、原讨论 URL、评审状态与原生 commit/path/line 一并保存；普通 PR 评论不伪造不存在的 commit 归属。事件绑定当前项目、任务、工单及交付版本。只有来源策略允许的真人反馈才唤起所选 Agent；机器人、未授权者、过期关联均留 ignored 原因。
+
+Agent 可回答、澄清或用 task.follow_up 跟进原工单，不按评论关键词强制返工。评审事件的工具集合通过反应注册接口安装，只能读现状、跟进本任务和回复原讨论，不能改目标/分工、另派任务或代替人验收。明确指向旧提交的反馈不能直接驱动新版本代码修改，应先澄清。
+
+跟进时保留真实反馈作者和事件 ID；原工单收到内部委托，回复目标仍为原 PR/行线程。工作者通过 reply_to_trigger_id 明确指出本轮反馈；code.feedback.result 内部事实负责可靠回写真实结果或阻塞问题，复用 Outbox 与原有回复权限。处理回执含项目因果标识，网络不确定时由已有幂等评论机制重试，不将已转交说成已修复。转交结果同步项目群，实际修复结果回到原讨论。
+
+群里提出“把这些测试结果同步到这个 PR”时，Agent 可用 discussion.reply。仅允许当前任务已关联的 PR 或有效评审线程；通过已注册来源的 discussion 能力解析地址，不在项目工具中分支识别 GitHub/GitLab。登记后仍以发送回执确认成功。
+
+同账号真人评论可接入：不再按整个登录账号过滤已绑定 PR 的反馈。自动评论需同时匹配发送账号、持久回执和精确消息标记/内容才视为回声；卡片累计回复保留独立关联键。真人文字不等于已验证的钉钉成员身份，GitHub技术评审也不代替业务验收。
+
+PR 出现新 head 或不再符合原合并证据时，旧的代码验收快照失效；验收请求、后续提交及 Issue 关闭仍按当前交付版本核验。发布事实、读取游标、Agent 提案、内部结果和 Outbox 各有恢复记录；已完成的反馈不因恢复重复派工。
+
+```json
+{
+  "sources": {
+    "github": {
+      "on": {
+        "code.feedback.received": {
+          "enabled": true,
+          "description": "接收 PR 讨论和评审，结合当前任务判断回答或跟进原工单。"
+        }
+      }
+    }
+  }
+}
+```

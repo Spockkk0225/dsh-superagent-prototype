@@ -19,7 +19,7 @@ import type { AgentSessionRef } from './app/session-binding.ts'
 import type { RobotPlannerId } from './harness/robot-agents.ts'
 import type { SettingsSave } from './policy.ts'
 import type { Retry } from './sources/github.ts'
-import type { CiSnapshot } from './sources/github-read.ts'
+import type { CiSnapshot } from './sources/github.ts'
 import type { Health } from './sources/host.ts'
 
 type BranchCiState = { branch?: string; failures?: string[]; revision: number; settled?: string; reported?: string; reportedSnapshot?: CiSnapshot }
@@ -57,6 +57,7 @@ export const KV = {
     readiness: family<{ signature: string; episode: string }>('project-readiness:'),
     check: family<ProjectCheck>('project-check:'),
     remoteFact: family<RepositoryFact & { projectId: string; taskId: string }>('project-remote-fact:'),
+    feedback: family<import('./sources/repository-events.ts').RepositoryFeedback & { source: string; eventId: string; projectId: string; taskId: string }>('project-feedback:'),
     issueSync: family<IssueSync>('project-issue-sync:'),
     historyBaseline: family<true>('project-history-baseline:'),
     plan: family<ProjectPlanRecord>('project-plan:'), latestPlan: family<ProjectPlanRecord>('project-latest-plan:'),

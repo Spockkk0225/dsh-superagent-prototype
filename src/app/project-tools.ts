@@ -9,6 +9,9 @@ import { ReviewEvidence, type ProjectReviews } from './project-reviews.ts'
 import { CommunicationPreference, type Communication } from './communication.ts'
 import type { ProjectProgress } from './project-progress.ts'
 import { taskRemoteFacts } from './repository-delivery.ts'
+import type { ProjectEvent } from '../sources/project-events.ts'
+import { RepositoryFeedback } from '../sources/repository-events.ts'
+import { projectChannel } from './project-notifications.ts'
 
 const id = z.string().min(1).max(128)
 const editable = TaskInput.omit({ status: true, ticketId: true })
@@ -24,8 +27,9 @@ export interface ProjectToolContext {
   operationId: string
   channel: ChannelRef
   reviewId?: string
+  event?: ProjectEvent
 }
-export interface ProjectToolResult { summary: string; data?: unknown }
+export interface ProjectToolResult { summary: string; data?: unknown; replyChannel?: ChannelRef }
 export interface ProjectOperation {
   name: string
   description: string
@@ -41,7 +45,8 @@ export interface ProjectToolsHost {
   progress?(): ProjectProgress | undefined
   start(projectId: string, taskId: string, revision: number): ProjectDetail
   stop(projectId: string, taskId: string, ticketId: string): ProjectDetail
-  follow(projectId: string, taskId: string, ticketId: string, text: string): ProjectDetail
+  follow(projectId: string, taskId: string, ticketId: string, text: string, origin?: ProjectEvent): ProjectDetail
+  reply?(context: ProjectToolContext, taskId: string, url: string, text: string): unknown
 }
 
 function operation<S extends z.ZodType>(name: string, description: string, schema: S,
@@ -133,8 +138,22 @@ export class ProjectTools {
       z.strictObject({ taskId: id, text: z.string().trim().min(1).max(8000) }), (context, args) => {
         const current = task(context, args.taskId)
         if (!current.ticketId) throw new ProjectError(409, 'Task has no execution ticket')
+        if (context.event) {
+          const feedback = RepositoryFeedback.safeParse(context.event.data)
+          if (feedback.success) {
+            host.follow(context.projectId, current.id, current.ticketId, args.text, context.event)
+            return { summary: `已将补充信息交给「${current.title}」的执行 Agent`, replyChannel: projectChannel(host.store, this.projects.detail(context.projectId)) }
+          }
+        }
         host.follow(context.projectId, current.id, current.ticketId, args.text)
         return { summary: `已将补充信息交给「${current.title}」的执行 Agent` }
+      }))
+    this.register(operation('discussion.reply', '根据成员要求向当前任务已关联的代码交付或评审线程回复。只登记可靠投递，实际发送以回执为准；不能自行猜测其他仓库的地址。',
+      z.strictObject({ taskId: id, url: z.url(), text: z.string().trim().min(1).max(8000) }), (context, args) => {
+        task(context, args.taskId)
+        if (!host.reply) throw new ProjectError(409, 'Repository discussion replies are unavailable')
+        return { summary: '讨论回复已登记，实际投递以回执为准。', data: host.reply(context, args.taskId, args.url, args.text),
+          ...(context.event ? { replyChannel: projectChannel(host.store, this.projects.detail(context.projectId)) } : {}) }
       }))
     this.register(operation('delivery.submit', '提交人工任务的交付证据并请求验收。仅提交成员明确提供的结果，不得自行编造已完成的产物。Agent 任务由成功工单自动发起验收。',
       ReviewEvidence.extend({ taskId: id }), (context, { taskId, ...evidence }) => ({
@@ -171,6 +190,10 @@ export class ProjectTools {
       conversationPreference: channel ? this.host.communication.read(channel) : undefined,
       scheduledChecks: this.host.progress?.()?.checks(projectId) ?? [],
       repositoryFacts: project.tasks.flatMap(task => taskRemoteFacts(this.host.store, project, task).map(fact => ({ taskId: task.id, ...fact }))),
+      repositoryFeedback: this.host.store.keys(KV.projects.feedback).map(entry => this.host.store.get(entry)!)
+        .filter(feedback => feedback.projectId === projectId).sort((a,b) => Date.parse(b.updatedAt)-Date.parse(a.updatedAt)).slice(0, 20)
+        .map(({body, diff, ...feedback}) => ({...feedback, body: body.slice(0,1500), bodyChars: body.length,
+          ...(diff ? {diff:diff.slice(0,1000),diffChars:diff.length} : {})})),
       synchronization: this.host.store.keys(KV.projects.issueSync).map(entry => this.host.store.get(entry)!).filter(item => item.projectId === projectId) }
   }
 

@@ -10,7 +10,7 @@ import type { Store } from './store.ts'
 
 export interface SourceContextDeps {
   eventPublisherFor?: (source: string) => SourceContext['projectEvents']
-  readonly store: Pick<Store, 'atomic' | 'get' | 'set' | 'delete' | 'keys' | 'threads' | 'tickets' | 'triggers' | 'read'>
+  readonly store: Pick<Store, 'atomic' | 'get' | 'set' | 'delete' | 'keys' | 'threads' | 'tickets' | 'triggers' | 'read' | 'receipts'>
   readonly outbox: Pick<Outbox, 'send'>
   readonly engine: Pick<EngineForSources, 'bindThread' | 'threadClosed'>
   readonly commands: Commands
@@ -44,6 +44,13 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
     configured: () => deps.configured(),
     projectRepositories: deps.projectRepositories,
     projectResources: deps.projectResources,
+    outgoingMessage: id => {
+      const message = store.receipts.get(id) ?? store.receipts.correlated(id)
+      return message ? { source: message.channel.source, text: message.text } : undefined
+    },
+    originalChannel: trigger => trigger.originalChannel ?? (trigger.channel?.source === trigger.source ? trigger.channel : undefined)
+      ?? (trigger.url ? deps.sources.kind(trigger.source)?.discussion?.(
+        typeof trigger.meta.repository === 'string' ? trigger.meta.repository : deps.deployment.repository, trigger.url) : undefined),
     get problem() { return [deps.feishuProblem, deps.setupProblem].find(problem => problem?.place === kind.kind) },
     config: <C extends Record<string, unknown>>(id: string) => {
       const instance = deps.sources.instance<C>(id)

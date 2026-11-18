@@ -86,7 +86,14 @@ export class Communication {
 
   prepare(message: OutboundMessage): OutboundMessage {
     const preference = this.read(message.channel)
-    return { ...message, format: message.format ?? preference.value.format }
+    const input = message.channel.address.triggerId ? this.host.store.triggers.get(message.channel.address.triggerId) : undefined
+    const origin = message.ticketId ? this.host.store.tickets.get(message.ticketId) : undefined
+    const trigger = input ?? (origin ? this.host.store.triggers.get(origin.origin.triggerId) : undefined)
+    const projectId = trigger?.meta.projectId, taskId = trigger?.meta.projectTaskId
+    return { ...message, ...!message.origin && typeof projectId === 'string' ? { origin: { projectId,
+      ...(typeof taskId === 'string' ? { taskId } : {}),
+      ...(typeof trigger?.meta.projectEventId === 'string' ? { eventId: trigger.meta.projectEventId } : {}) } } : {},
+      format: message.format ?? preference.value.format }
   }
 
   notify(message: OutboundMessage): void {

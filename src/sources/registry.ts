@@ -99,6 +99,13 @@ export class SourceRegistry implements SourceScope {
     if (!kind) return 'waiting'
     return kind.channel ? kind.channel.send({ commands }, message) : 'gone'
   }
+  /** Resolves repository replies through installed adapters rather than provider branches in application tools. */
+  discussion(repository: string, url: string): ChannelRef | undefined {
+    const targets = [...this.kinds.values()].filter(kind => this.instance(kind.kind)?.enabled)
+      .flatMap(kind => { const target = kind.discussion?.(repository, url); return target ? [target] : [] })
+    if (targets.length > 1) throw new Error('Ambiguous repository discussion provider')
+    return targets[0]
+  }
   link(channel: ChannelRef, links: ChannelLinks): ChannelLink {
     const link = this.kinds.get(channel.source)?.channel?.link(channel.address, links)
     return link ?? { url: '', label: { zh: channel.source, en: channel.source } }

@@ -8,7 +8,7 @@ import type { ProjectAgentRun } from '../src/app/project-agent.ts'
 import { ProjectChange, ProjectInput, Projects } from '../src/app/projects.ts'
 import { projectMessageReceived } from '../src/sources/project-message.ts'
 import { DingTalk, dingTalkKind } from '../src/sources/dingtalk.ts'
-import { dingTalkProjectIntake } from '../src/sources/dingtalk-projects.ts'
+import { dingTalkProjectIntake } from '../src/sources/dingtalk.ts'
 import { startRuntime, type Host } from './fixtures/host.ts'
 import { deferred } from './fixtures/async.ts'
 

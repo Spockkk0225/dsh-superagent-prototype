@@ -178,7 +178,7 @@ sequenceDiagram
 | 动作执行 | 派工、问人、发通知、开或关 Issue，回写结果 | 复用 Engine、`Effects`、`Outbox` 和 `ProjectIssues`。同一验收请求、交付或 Issue 操作用稳定键关联 |
 | 看板与时间线 | 显示当前状态、事实来源、动作结果及下一步，供网页和群内查询 | 保留项目看板和 Agent 状态页，项目通知由新事件处理统一产生 |
 
-每个任务继续使用稳定 ID。存量工单和可确认的 PR 关联导入对应交付；历史已完成任务保留结果。已有 Issue 默认迁移为「仅参考」，由成员明确哪项可以在验收后关闭。迁移时使用历史通知回执核对，切换后的项目只由新队列推进。 [当前项目推进](../src/app/project-progress.ts) · [看板 API](../src/app/http.ts) · [GitHub PR 监听](../src/sources/github-pull.ts)
+每个任务继续使用稳定 ID。存量工单和可确认的 PR 关联导入对应交付；历史已完成任务保留结果。已有 Issue 默认迁移为「仅参考」，由成员明确哪项可以在验收后关闭。迁移时使用历史通知回执核对，切换后的项目只由新队列推进。 [当前项目推进](../src/app/project-progress.ts) · [看板 API](../src/app/http.ts) · [GitHub PR 监听](../src/sources/github.ts)
 
 ## 7. 验收这套设计
 

@@ -1,8 +1,8 @@
 /** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, and reporting status. */
 import { z } from 'zod'
-import { liveTicket, type EngineForExecutor, type Ticket } from '../../core/index.ts'
+import { liveTicket, type EngineForExecutor, type Ticket, type WorkerReport } from '../../core/index.ts'
 import { IM_WORDS } from '../../infra/text.ts'
-import { claimProjectPull, claimPull, readPull } from '../../sources/github-pull.ts'
+import { claimProjectPull, claimPull, readPull } from '../../sources/github.ts'
 import type { SourceContext } from '../../sources/host.ts'
 import { readResource, type ResourceHost } from '../resources.ts'
 import type { Store } from '../store.ts'
@@ -20,6 +20,7 @@ export interface ExecutorToolsHost {
   /** GitHub Source context whose pull-request rules govern claiming a reported PR. */
   readonly github: SourceContext
   sendReplies(): Promise<void>
+  reportDelivery?(ticket: Ticket, report: WorkerReport): boolean
 }
 
 export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
@@ -104,9 +105,10 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
             ...(args.question_for_trigger_id ? { askedBy: args.question_for_trigger_id } : {}),
             ...(args.reply_to_trigger_id ? { answers: args.reply_to_trigger_id } : {}) }
           const updated = host.engine.report(ticketId, report)
-          const relay = reportRelay(updated, report)
+          const delivered = host.reportDelivery?.(updated, report)
+          const relay = delivered ? undefined : reportRelay(updated, report)
           if (relay) host.sessions.relay(relay.id, relay.text)
-          const notification = relay ? 'orchestrator' : 'internal_only'
+          const notification = delivered ? 'project_event' : relay ? 'orchestrator' : 'internal_only'
           return { reported: true, notification, ...(updated.attention ? { attention: updated.attention } : {}) }
         })
       },

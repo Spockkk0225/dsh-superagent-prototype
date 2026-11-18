@@ -26,7 +26,7 @@ export const checkDue: ProjectEventDefinition = {
   documentation: 'docs/events/follow-up.zh-CN.md',
 }
 export interface ProjectCheck { id: string; projectId: string; taskId: string; at: string; reason: string; signature: string; fired?: boolean }
-interface Host { store: Store; events: ProjectEvents; agent: Pick<ProjectAgent, 'react'>; lifetime: AbortSignal; now?: () => number }
+interface Host { store: Store; events: ProjectEvents; agent: Pick<ProjectAgent, 'react'> & Partial<Pick<ProjectAgent, 'registerReaction'>>; lifetime: AbortSignal; now?: () => number }
 const scope = (project: Project, task: ProjectTask) => key(JSON.stringify({ repository: project.repository,
   title: task.title, description: task.description, acceptance: task.acceptance, ownerId: task.ownerId,
   deliveryMode: task.deliveryMode ?? 'report', pullRequestUrl: task.pullRequestUrl ?? null, targetBranch: task.targetBranch ?? null,
@@ -45,6 +45,10 @@ export class ProjectProgress {
     this.now = host.now ?? Date.now
     host.events.register('project', [taskReady])
     host.events.register('clock', [checkDue])
+    for (const type of [taskReady.type, checkDue.type, 'task.blocked']) host.agent.registerReaction?.(type, {
+      tools: ['project.inspect', 'runtime.inspect', 'task.start', 'task.follow_up', 'follow_up.schedule', 'follow_up.cancel'],
+      current: (event, replyOnly) => this.current(event, replyOnly),
+    })
     host.events.handle(taskReady.type, event => {
       const project = event.projectId && host.store.get(KV.projects.project(event.projectId))
       const task = project && project.tasks.find(item => item.id === event.taskId)

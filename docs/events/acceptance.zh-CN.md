@@ -128,3 +128,19 @@ GitHub 状态事件与推进记录已纳入第 5、6 部分。自主跟进已纳
 新增测试验证独立 GitHub / GitLab 设置、自定义 merge_request.updated 类型的自动模板、描述为空的恢复、字段继承、旧格式兼容、无效来源与指令拒绝、完整模板与注册表一致。完整 pnpm check：76 个测试文件、1416 项通过、2 项既有跳过；类型检查与构建通过。
 
 配置归拢部署前备份：`.artifacts/state-backups/before-repository-history-1794978508150.sqlite`。已加载本机 3090 新版本：workflow revision=1、项目 revision=19，真实入站 seq=38 与到期 seq=41 均各关联一条正确 Agent run；check.due 仍仅一条，首次 Markdown 通知仍仅一条，未重触发。运行时、钉钉、GitHub 均 ready。
+
+## 所有现有来源收敛与 PR 协作验收（2026-11-18）
+
+结构及扩展说明见[事件源结构](../source-adapters.zh-CN.md)，真实操作步骤见[2048 人工验收清单](../2048-manual-acceptance.zh-CN.md)。
+
+- GitHub、钉钉、飞书、本地请求各保留一份提供者实现。删除 14 份拆散的提供者实现文件，调用方全部改走来源入口；配置和文档继续按注册来源维护。
+- 所有来源遵循 SourceKind / SourceRegistry 能力契约。仓库适配器继承 RepositorySource，复用资源筛选、读请求合并、任务与版本游标、事务发布及失败隔离。模拟第二个仓库提供者验证同一基类，不表示已接入真实 GitLab。
+- GitHub 的普通 PR 评论、行讨论、Review 进入 code.feedback.received；Agent 根据原文与项目事实决定答疑、澄清或跟进原工单，不新增关键词派工。当前授权、链接、线程、代码版本及允许工具在实际操作前再次检查。
+- 原工单明确引用反馈输入后，真实报告或待回答问题发布 code.feedback.result，通过 Outbox 回到原 PR 或行线程。保留实际回执；转交执行不等于完成。网络写入结果不确定时读取已存在的消息标记，避免重复发评论。
+- 自动回声必须匹配账号、真实持久输出和精确内容；同一登录账号的人类评论仍可处理。停用、撤权、旧代码、未绑定讨论及旧验收快照有回归覆盖。
+- 完整 pnpm check：77 个测试文件，1432 项通过、2 项既有跳过；类型检查与构建通过。飞书既有接入、图片与上下文读取纳入回归，本轮不新增飞书项目群绑定。
+- 真实 Codex 隔离验证 5 次模型调用：只读问题调用 discussion.reply，未跟进；修复请求调用 task.follow_up 跟进原工单，并回复原讨论。跟进计数为 1，没有真实 Worker、真实群消息或远端写操作。
+
+部署前数据库备份：`.artifacts/state-backups/before-repository-history-1794985114718.sqlite`。新版本已加载本机 3090，运行时、GitHub、钉钉 Stream 均 ready。workflow revision=1，新增反馈事件有效开启；工具目录包含 discussion.reply。
+
+真实项目 revision=20，A done、B in-progress 且仍为原工单、C todo，B 的 Issue 责任为 resolve，未新增 PR 或替代工单，未代验收。SUPERAGENT_PROJECT_PREVIEW_LAN=0 保持本机访问。当前 2048 仓库尚无真实 PR，因此普通评论、行评审、Review 到真实执行和回写的完整远端验收仍待进行，不能以隔离测试代替。

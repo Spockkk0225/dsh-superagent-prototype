@@ -13,6 +13,10 @@
         "code.change.observed": {
           "enabled": true,
           "description": "记录当前代码交付的开放、关闭或合并事实，核对代码版本后检查是否可请求验收。"
+        },
+        "code.feedback.received": {
+          "enabled": true,
+          "description": "接收关联代码交付的评论、行讨论或评审，由 Agent 判断如何回答或跟进原工单，并保留原讨论回执。"
         }
       }
     }

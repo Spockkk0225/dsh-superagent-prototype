@@ -73,6 +73,7 @@ export interface MessagePresentation {
   title: string; status: string; summary: string; action?: string; evidence?: string; reference?: string; details?: string
 }
 export interface OutboundMessage { id: string; channel: ChannelRef; text: string; kind: 'acknowledgement' | 'reply' | 'notice'; ticketId?: string
+  correlation?: string
   origin?: { projectId: string; taskId?: string; eventId?: string; runId?: string }
   format?: 'text' | 'markdown'; title?: string; presentation?: MessagePresentation }
 /** A queued message waits (`pending`), went out (`sent`), or was dropped because its conversation can never receive it (`dropped`). */

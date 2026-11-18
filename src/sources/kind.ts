@@ -101,6 +101,8 @@ export interface SourceKind<C extends Record<string, unknown> = Record<string, u
   health: string[]
   /** Optional project facts normalized by this adapter; definitions include built-in defaults and documentation. */
   projectEvents?: readonly ProjectEventDefinition[]
+  /** Optional repository capability: parse only this provider's discussion addresses into a safe reply channel. */
+  discussion?(repository: string, url: string): ChannelRef | undefined
   /** Listening rule for a trigger (or recorded Mandate basis) of this kind; kinds without `scope` listen to everything they produce and observe none of it. */
   scope?(input: { meta: Record<string, unknown> }, config: C): ScopeResult
   /** Outbound reply adapter; kinds without `channel` produce no replies or channel checks. */

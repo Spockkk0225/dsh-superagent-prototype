@@ -2,7 +2,7 @@
 
 配置按**已注册事件源**组织。每个来源维护自己的事件类型、数据校验、默认值和说明；来源名称与类别没有固定枚举。GitHub 使用 `sources.github`，未来安装 GitLab 适配器后使用 `sources.gitlab`。两者即使发布同一种通用事件，也可以独立设置。
 
-所有来源共用现有 SQLite 有序事件队列、事务、Effects 和 Outbox。来源负责接入并描述事实，事件处理器负责状态与动作，Agent 根据上下文决定需要哪些已发布工具。配置文件的组织不新增一套流程引擎，也不改变人工验收授权。
+来源结构与扩展契约见[事件源结构](../source-adapters.zh-CN.md)。所有项目来源共用现有 SQLite 有序事件队列、事务、Effects 和 Outbox。来源负责接入并描述事实，事件处理器负责状态与动作，Agent 根据上下文决定需要哪些已发布工具。配置文件的组织不新增一套流程引擎，也不改变人工验收授权。
 
 ## 按来源维护一份 JSON
 
@@ -10,7 +10,7 @@
 
 | 注册来源 | 默认配置 | 覆盖的事件与说明 |
 | --- | --- | --- |
-| `github` | [GitHub 默认值](../../config/events/github.defaults.json) | Issue / PR 观察，[仓库事件](repository.zh-CN.md) |
+| `github` | [GitHub 默认值](../../config/events/github.defaults.json) | Issue / PR 观察、评论与 Review，[仓库事件](repository.zh-CN.md) |
 | `repository` | [仓库同步默认值](../../config/events/repository.defaults.json) | 验收后关闭负责解决的 Issue、关联事实，[仓库事件](repository.zh-CN.md) |
 | `dingtalk` | [钉钉默认值](../../config/events/dingtalk.defaults.json) | 群消息驱动 Agent，[沟通事件](communication.zh-CN.md) |
 | `request` | [本地请求默认值](../../config/events/request.defaults.json) | 网页与本地消息驱动 Agent，[沟通事件](communication.zh-CN.md) |
