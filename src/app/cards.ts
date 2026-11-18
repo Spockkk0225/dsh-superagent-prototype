@@ -1,7 +1,7 @@
 /** Compact, bounded model-facing projections of triggers, tickets, threads, and decisions; full texts stay behind readable resources. */
 import { latestReport, reasonText, threadKey, ticketStage, type Decision, type Mandate, type Thread, type Ticket, type TicketInput,
   type Trigger, type TriggerDisposition } from '../core/index.ts'
-import { pullOf } from '../sources/github-pull.ts'
+import { pullOf } from '../sources/github.ts'
 import { batchLine, inputResource } from '../executor/dsh.ts'
 
 /** Collapses whitespace and truncates text for display previews while keeping code, angle brackets, and links intact for model readers. */
@@ -13,7 +13,7 @@ export function triggerCard(trigger: Trigger, disposition?: TriggerDisposition) 
       ...(disposition.decisionId ? { decision_id: disposition.decisionId } : {}),
       delivered_to: disposition.fanout } } : {}) }
 }
-/** The states a ticket card shows: an open ticket's stage (docs/003), and an ended ticket's outcome. */
+/** The states a ticket card shows: an open ticket's stage, and an ended ticket's outcome. */
 export const TICKET_STATES = ['person/delivery', 'person/answer', 'person/review', 'person/blocked', 'person/failed', 'working', 'working/queued', 'idle',
   'completed', 'merged', 'closed', 'dropped', 'stopped'] as const
 export type TicketCardState = typeof TICKET_STATES[number]

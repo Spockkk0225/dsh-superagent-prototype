@@ -2,7 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { mkdir, rmdir, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, rename, rm, rmdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
 import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
@@ -235,8 +235,9 @@ export class DshExecutor implements Executor {
     host.effects.handle('delivery', payload => this.deliverQueued(payload.ticketId), { limit: () => host.paused() ? 0 : 4, quiet: true })
   }
   /** Populates a newly accepted ticket's `execution` attributes (worktree name, workspace directory, and assignment text). */
-  prepare(ticket: Ticket, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>): Ticket {
-    return { ...ticket, execution: ticketExecution(ticket, outcome, this.host.store.settings(), this.host.machine.stateDir) }
+  prepare(ticket: Ticket, outcome: Extract<AssessmentOutcome, { kind: 'accept' }>, projectRepository?: string | null): Ticket {
+    return { ...ticket, execution: { ...ticketExecution(ticket, outcome, this.host.store.settings(), this.host.machine.stateDir),
+      ...(projectRepository === undefined ? {} : { projectRepository }) } }
   }
   /**
    * Runs the configured `executor.prepare` command for a new ticket workspace in its parent directory with the ticket's
@@ -251,6 +252,11 @@ export class DshExecutor implements Executor {
     const env = Object.fromEntries(this.host.environment(ticket).map(variable => [variable.key, variable.value]))
     // Enforce a timeout so a hung prepare command (such as on a credential prompt) fails the ticket instead of holding a worker slot indefinitely.
     const signal = AbortSignal.any([this.host.lifetime, AbortSignal.timeout(PREPARE_TIMEOUT_MS)])
+    if (ticket.execution?.projectRepository !== undefined) {
+      const { projectRepository, name } = ticket.execution
+      await this.prepareProjectDirectory(directory, name, projectRepository, signal)
+      return
+    }
     if (command) await runAsWorker(this.host.context.subprocess, ['sh', '-c', command], dirname(directory), signal, env)
       .catch(async (error: unknown) => {
         // Remove an empty directory left by a failed prepare command so a later retry does not treat it as already prepared.
@@ -259,6 +265,24 @@ export class DshExecutor implements Executor {
       })
     await mkdir(directory, { recursive: true })
     await verifyDirectory(directory, this.host.context.subprocess, this.host.lifetime)
+  }
+  /** A project workspace is published only after cloning or initializing it successfully. */
+  private async prepareProjectDirectory(directory: string, name: string, repository: string | null, signal: AbortSignal): Promise<void> {
+    const temporary = await mkdtemp(join(dirname(directory), '.project-'))
+    const subprocess = this.host.context.subprocess
+    const git = (...args: string[]) => runAsWorker(subprocess, ['git', ...args], temporary, signal, { GIT_TERMINAL_PROMPT: '0' })
+    try {
+      if (repository) {
+        await git('clone', '--', `https://github.com/${repository}.git`, '.')
+        await git('switch', '-c', `agent/${name}`)
+      } else await git('init', '--quiet', '--template=')
+      await verifyDirectory(temporary, subprocess, signal)
+      await rename(temporary, directory)
+    } catch (error) {
+      throw new PrepareFailed(`The project workspace could not be prepared: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
   }
   /** Enqueues a `launch` effect for an accepted or resumed assignment; launches start in queue order as worker slots free up. */
   start(ticket: Ticket, assignment: Assignment): void {

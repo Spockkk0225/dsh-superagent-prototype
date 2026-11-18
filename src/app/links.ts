@@ -1,7 +1,7 @@
 /** Source message link resolution and candidate card assembly for the main Session. */
 import type { Candidate, Ticket, Trigger } from '../core/index.ts'
 import type { Commands } from '../infra/commands.ts'
-import { readFeishuLink } from '../sources/feishu-read.ts'
+import { readFeishuLink } from '../sources/feishu.ts'
 import { feishuRef, feishuSettings } from '../sources/feishu.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
 import { triggerMessage } from '../executor/dsh.ts'

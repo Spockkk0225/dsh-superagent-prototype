@@ -1,6 +1,6 @@
 /**
  * Model surface contract tests: verify registered tools, system prompts, skills, and session inputs for the
- * orchestrator and worker roles against tool schemas, environment variables, glossary rules (`docs/001`), and size budgets.
+ * orchestrator and worker roles against tool schemas, environment variables, domain terminology, and size budgets.
  */
 import { Context } from '@deepseek-ai/cordis'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -48,7 +48,7 @@ const TICKETS = 'src/core/tickets.ts', ASSIGNMENTS = 'src/core/assignments.ts'
 const RESOURCE_NAMES = RESOURCES.map(({ name }) => new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/<[^>]+>/g, '[^/\\s]+').replace('…', '.+')}$`))
 /** Report and assignment states, which text names as such; a ticket or a worker is in one of the card states (TICKET_STATES). */
 const REPORT_WORDS = /^(ready|waiting|blocked|failed|progress|running|queued)$/
-/** Retired terminology superseded by `docs/001`. */
+/** Retired terminology for the execution domain. */
 const LEGACY: [word: string, pattern: RegExp][] = [['reopen', /reopen/i], ['event/', /(?<![\w-])event\//], ['task/', /(?<![\w-])task\//],
   ['member', /\bmembers?\b/i], ['topic', /\btopics?\b/i], ['admission_', /\badmission_/], ['guide/', /\bguide\//]]
 /** Disallowed phrases in generated or static model-facing text. */

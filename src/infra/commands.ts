@@ -64,6 +64,11 @@ export class Commands {
   constructor(private readonly resolved: () => Deployment, private readonly environment: Record<string, string | undefined>, private readonly signal: AbortSignal) {}
   get deployment(): Deployment { return this.resolved() }
   get repository(): string { return this.deployment.repository }
+  forRepository(repository: string): Commands {
+    if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(repository) || /\/\.{1,2}$/.test(repository))
+      throw new Error('Use a GitHub repository in owner/name format')
+    return new Commands(() => ({ ...this.deployment, repository }), this.environment, this.signal)
+  }
   withSignal(signal?: AbortSignal): Commands { return signal ? new Commands(this.resolved, this.environment, AbortSignal.any([this.signal, signal])) : this }
   async run(program: string, args: string[], cwd?: string): Promise<string> {
     try {
@@ -92,6 +97,7 @@ export class Commands {
     return validItems(item, pages.flat(), tally)
   }
   private path(path: string): string {
+    if (!this.repository) throw new Error('No GitHub repository is selected')
     const outside = /^\/|^[a-z]+:|(^|\/)\.\.?(\/|\?|$)/i.test(path)
     if (outside) throw new Error('GitHub calls are restricted to the configured repository')
     return path ? `repos/${this.repository}/${path}` : `repos/${this.repository}`

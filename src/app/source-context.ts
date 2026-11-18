@@ -9,7 +9,8 @@ import type { Outbox } from './outbox.ts'
 import type { Store } from './store.ts'
 
 export interface SourceContextDeps {
-  readonly store: Pick<Store, 'atomic' | 'get' | 'set' | 'delete' | 'keys' | 'threads' | 'tickets' | 'triggers' | 'read'>
+  eventPublisherFor?: (source: string) => SourceContext['projectEvents']
+  readonly store: Pick<Store, 'atomic' | 'get' | 'set' | 'delete' | 'keys' | 'threads' | 'tickets' | 'triggers' | 'read' | 'receipts'>
   readonly outbox: Pick<Outbox, 'send'>
   readonly engine: Pick<EngineForSources, 'bindThread' | 'threadClosed'>
   readonly commands: Commands
@@ -18,6 +19,8 @@ export interface SourceContextDeps {
   readonly deployment: Deployment
   readonly ready: Promise<void>
   configured(): boolean
+  projectRepositories?: SourceContext['projectRepositories']
+  projectResources?: SourceContext['projectResources']
   /** Setup problem whose `place` matches the Source kind receives it on `context.problem`. */
   readonly setupProblem?: SetupProblem | undefined
   /** Why setup found no Feishu bot even though the Feishu Source names a CLI. */
@@ -34,10 +37,20 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
   const { store } = deps
   const health = deps.sources.healthEntries(kind.health)
   return {
+    projectEvents: deps.eventPublisherFor?.(kind.kind),
     get deployment() { return deps.deployment },
     commands: deps.commands,
     ready: deps.ready,
     configured: () => deps.configured(),
+    projectRepositories: deps.projectRepositories,
+    projectResources: deps.projectResources,
+    outgoingMessage: id => {
+      const message = store.receipts.get(id) ?? store.receipts.correlated(id)
+      return message ? { source: message.channel.source, text: message.text } : undefined
+    },
+    originalChannel: trigger => trigger.originalChannel ?? (trigger.channel?.source === trigger.source ? trigger.channel : undefined)
+      ?? (trigger.url ? deps.sources.kind(trigger.source)?.discussion?.(
+        typeof trigger.meta.repository === 'string' ? trigger.meta.repository : deps.deployment.repository, trigger.url) : undefined),
     get problem() { return [deps.feishuProblem, deps.setupProblem].find(problem => problem?.place === kind.kind) },
     config: <C extends Record<string, unknown>>(id: string) => {
       const instance = deps.sources.instance<C>(id)

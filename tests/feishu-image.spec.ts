@@ -7,8 +7,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
 import { Commands } from '../src/infra/commands.ts'
 import { testDeployment } from './fixtures/deployment.ts'
-import { admissionImageKeys, readAdmissionImage } from '../src/sources/feishu-image.ts'
-import type { FeishuRef } from '../src/sources/feishu-read.ts'
+import { admissionImageKeys, readAdmissionImage } from '../src/sources/feishu.ts'
+import type { FeishuRef } from '../src/sources/feishu.ts'
 
 let directory: string
 let agent: Agent

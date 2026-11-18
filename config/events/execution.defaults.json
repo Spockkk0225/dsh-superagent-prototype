@@ -1,0 +1,16 @@
+{
+  "sources": {
+    "execution": {
+      "on": {
+        "delivery.ready": {
+          "enabled": true,
+          "description": "当前执行已成功交付，将任务移到待验收并通知验收人。"
+        },
+        "task.blocked": {
+          "enabled": true,
+          "description": "当前工单报告受阻或等待人工回答，向项目群通知具体原因及问题。"
+        }
+      }
+    }
+  }
+}

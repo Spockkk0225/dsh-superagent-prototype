@@ -1,0 +1,39 @@
+html {
+  color-scheme: light dark;
+  font: 14px/1.5 "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --dsw-alias-label-primary: light-dark(#182226, #edf2f1);
+  --dsw-alias-label-primary-foreground: light-dark(#fff, #132925);
+  --dsw-alias-label-secondary: light-dark(#4b5b61, #b4c0c1);
+  --dsw-alias-label-tertiary: light-dark(#5c6c71, #a9b4b7);
+  --dsw-alias-label-caption: var(--dsw-alias-label-tertiary);
+  --dsw-alias-link: var(--dsw-alias-brand-primary);
+  --dsw-alias-bg-layer-1: light-dark(#fff, #202a2d);
+  --dsw-alias-bg-layer-2: light-dark(#fff, #202a2d);
+  --dsw-alias-bg-layer-3: light-dark(#f2f6f5, #303d40);
+  --dsw-alias-bg-mask-1: #13292555;
+  --dsw-alias-border-l2: light-dark(#dee6e4, #415052);
+  --dsw-alias-border-l3: var(--dsw-alias-border-l2);
+  --dsw-alias-border-l4: light-dark(#cbd7d3, #506065);
+  --dsw-alias-brand-primary: light-dark(#126151, #8bd6c4);
+  --dsw-alias-button-primary-fill: var(--dsw-alias-brand-primary);
+  --dsw-alias-button-primary-hover: light-dark(#0d5144, #a4e3d4);
+  --dsw-alias-state-error-primary: light-dark(#a02a20, #ffada4);
+  --dsw-alias-state-warn-primary: light-dark(#875300, #ffd08b);
+  --dsw-alias-state-success-primary: light-dark(#176244, #86dbad);
+  --dsw-alias-interactive-bg-hover: light-dark(#eaf2ef, #303e40);
+  --dsw-alias-interactive-bg-active: light-dark(#dbe9e3, #394a4b);
+  --dsw-alias-tooltip-bg: light-dark(#202a2d, #141c1d);
+  --dsw-static-neutral-bluish-00: #fff;
+  --dsw-elevation-prominent: 0 12px 40px #0002;
+  background: light-dark(#f6f8f7, #141c1f);
+  color: var(--dsw-alias-label-primary);
+}
+body { margin: 0; }
+.dt-page > .dt-column { max-width: 1280px; }
+.dt-standalone-header { border-bottom: 1px solid var(--dsw-alias-border-l3); padding-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+.dt-standalone-header .dt-title { font-size: 15px; color: var(--dsw-alias-label-primary); letter-spacing: -.02em; }
+.dt-standalone-header::before { content: ''; width: 12px; height: 12px; border: 4px solid var(--dsw-alias-brand-primary); border-radius: 6px; }
+.dt-standalone-header .dt-project-locale { width: auto; margin-inline-start: auto; font-size: 13px; }
+
+.dt-history-json { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28rem; overflow: auto; font-size: 12px; }
+.dt-project-decision { padding: 0.75rem; margin-top: 0.5rem; border-left: 3px solid var(--dt-border, #ccd9d7); }

@@ -24,10 +24,10 @@ import { githubKind, pollRound } from '../src/sources/github.ts'
 import { CliError, Commands } from '../src/infra/commands.ts'
 import { UserError, key, runningAssignment, said, threadKey, waitsForPerson, type Trigger } from '../src/core/index.ts'
 import { feishuTrigger } from '../src/sources/feishu.ts'
-import { feishuChannel } from '../src/sources/feishu-trigger.ts'
-import { commentTrigger, githubChannel } from '../src/sources/github-trigger.ts'
+import { feishuChannel } from '../src/sources/feishu.ts'
+import { commentTrigger, githubChannel } from '../src/sources/github.ts'
 import { IM_WORDS } from '../src/infra/text.ts'
-import { observePull, pullOf } from '../src/sources/github-pull.ts'
+import { observePull, pullOf } from '../src/sources/github.ts'
 import { credentialHelper, workerGitConfig } from '../src/infra/environment.ts'
 import { policyHistory } from '../src/app/settings-history.ts'
 import { overview } from '../src/app/views/overview.ts'
@@ -555,7 +555,7 @@ it('projects read models for the management page and removes thread subscription
   runtime.store.threads.describe(thread.key, { label: 'Named by its source' })
   expect(threadList(viewsOf(runtime), 'all', 0, 20).items[0]).toMatchObject({ title: 'Named by its source' })
   expect((await api('GET', 'state')).body).not.toHaveProperty('tickets')
-  // scripts/dsh-superagent and agents read health from GET state (docs/006, Management API); settings and their revisions have their own route.
+  // scripts/dsh-superagent and agents read health from GET state; settings and their revisions have their own route.
   expect((await api('GET', 'state')).body).toMatchObject({ health: { runtime: { state: expect.any(String) } }, paused: false, load: { maxWorkers: 3 } })
   expect((await api('GET', 'settings')).body).toMatchObject({ sources: expect.arrayContaining([expect.objectContaining({ id: 'github',
     revision: expect.any(Number), value: expect.objectContaining({ enabled: true }) })]), blocks: { policy: { revision: expect.any(Number) } } })

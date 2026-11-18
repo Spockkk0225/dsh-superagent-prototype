@@ -174,7 +174,7 @@ describe('revalidating a Mandate from the admission table', () => {
   ]
   const cases = origins.flatMap(origin => [true, false].flatMap(listed => (['off', 'observe', 'auto'] as const).flatMap(mode => [true, false].flatMap(rule =>
     (['all', 'mentions', 'none'] as const).flatMap(scope => [true, false].map(holds => ({ ...origin, listed, mode, rule, scope, holds })))))))
-  /** docs/002: the Thread must still be received; a listed sender who addresses the agent is explicit; a sender listed since takes the listed cell. */
+  /** On resume the Thread must still be received; a listed sender who addresses the agent is explicit; a sender listed since takes the listed cell. */
   function expected({ cell, strength, listed, mode, rule, scope, holds }: typeof cases[number]): boolean {
     if (scope === 'none') return false
     if (cell === 'unlistedAddressed' && listed) return true
