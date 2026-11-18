@@ -27,14 +27,14 @@ function StandaloneProjects() {
   }, [locale])
   useEffect(() => {
     document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en'
-    document.title = `Super Agent · ${t('tab.projects')}`
+    document.title = `Super-Org · ${t('tab.projects')}`
     try { localStorage.setItem(LANG_KEY, locale) } catch { /* Language still applies for this page. */ }
   }, [locale, t])
   return <>
     <style>{STYLES}{THEME}</style>
     <div className="dt-page"><main className="dt-column">
       <header className="dt-standalone-header">
-        <h1 className="dt-title">Super Agent</h1>
+        <h1 className="dt-title">Super-Org</h1>
         <select className="dt-select dt-project-locale" aria-label={t('project.language')} value={locale}
           onChange={event => setLocale(event.currentTarget.value === 'en' ? 'en' : 'zh')}>
           <option value="zh" lang="zh-CN">简体中文</option>
