@@ -15,7 +15,11 @@ const PullSchema = z.looseObject({
 export type Pull = z.infer<typeof PullSchema> & { number: number }
 export const readPull = async (ctx: SourceContext, number: number, signal?: AbortSignal): Promise<Pull> =>
   ({ ...await ctx.commands.withSignal(signal).api(PullSchema, `pulls/${number}`), number })
-const pullNumber = (thread: string): number | undefined => thread.startsWith(`${SOURCE}:`) ? Number(thread.slice(SOURCE.length + 1)) : undefined
+const pullNumber = (thread: string): number | undefined => /^github:[1-9]\d*$/.test(thread) ? Number(thread.slice(SOURCE.length + 1)) : undefined
+export function projectPull(thread: string): { repository: string; number: number } | undefined {
+  const match = /^github:([a-z0-9-]+\/[a-z0-9_.-]+)\/pull\/([1-9]\d*)$/i.exec(thread)
+  return match ? { repository: match[1]!, number: Number(match[2]) } : undefined
+}
 export const pullsOf = (ticket: Pick<Ticket, 'follows'>, open = false): number[] =>
   (ticket.follows ?? []).filter(item => !open || !item.closed).flatMap(item => pullNumber(item.thread) ?? [])
 export const pullOf = (ticket: Pick<Ticket, 'follows'>): number | undefined => pullsOf(ticket, true).at(-1) ?? pullsOf(ticket).at(-1)
@@ -49,6 +53,41 @@ export function claimPull(ctx: SourceContext, ticketId: string, pr: Pull): strin
   const follow = ticket.follows?.find(item => item.thread === `${SOURCE}:${pr.number}`)
   if (pr.state === 'open' && (!follow || follow.closed || (opened && !follow.own))) bind(ctx, ticketId, pr, opened)
   return undefined
+}
+
+/** Claims a project PR in a repository-qualified thread so PR numbers can repeat across projects. */
+export function claimProjectPull(ctx: SourceContext, ticket: Ticket, repository: string, pr: Pull): string | undefined {
+  if (!agentPull(pr, { ...ctx.deployment, repository }) || !ticketBranch(ticket, pr.head.ref))
+    return 'The pull request must belong to this ticket branch in its project repository.'
+  if (pr.state !== 'open') return 'Report a project PR while it is still open.'
+  const id = `${repository}/pull/${pr.number}`
+  const thread = `${SOURCE}:${id}`
+  if (ctx.tickets.open().some(item => item.id !== ticket.id && item.follows?.some(follow => follow.thread === thread && !follow.closed)))
+    return 'PR already belongs to another active ticket'
+  ctx.tickets.bindThread(ticket.id, { source: SOURCE, id }, true)
+  ctx.threads.patch(thread, { number: pr.number, isPr: true, url: githubPage(repository, pr.number, true), prAuthor: pr.user.login })
+  return undefined
+}
+
+/** Reconciles only PRs already reported by project Workers, independently of repository-wide intake. */
+export async function pollProjectPulls(ctx: SourceContext, signal: AbortSignal): Promise<boolean> {
+  const follows = new Set(ctx.tickets.open().flatMap(ticket => (ticket.follows ?? []).filter(follow => !follow.closed).map(follow => follow.thread)))
+  let watched = false
+  let failure: unknown
+  for (const thread of follows) {
+    const target = projectPull(thread)
+    if (!target || signal.aborted) continue
+    watched = true
+    try {
+      const repo = ctx.commands.forRepository(target.repository).withSignal(signal)
+      const pr = await repo.api(PullSchema, `pulls/${target.number}`)
+      if (pr.state === 'closed' || pr.merged)
+        ctx.tickets.threadClosed({ source: SOURCE, id: thread.slice(SOURCE.length + 1) }, pr.merged ? 'merged' : 'closed',
+          pr.merged_at ?? pr.closed_at ?? new Date().toISOString())
+    } catch (error) { failure ??= error }
+  }
+  if (failure) throw failure
+  return watched
 }
 /**
  * Reconciles a polled PR's open/merged/closed state and auto-merge fact with any bound or branch-matching ticket.
@@ -91,17 +130,18 @@ function closePull(ctx: SourceContext, pr: Pull): void {
  */
 export function pullEndNotices(ticket: Ticket, request: string, repository: string): OutboundMessage[] {
   const outcome = ticket.ended?.outcome
-  const follows = (ticket.follows ?? []).filter(item => item.closed && pullNumber(item.thread) !== undefined)
+  const follows = (ticket.follows ?? []).filter(item => item.closed && (projectPull(item.thread) || pullNumber(item.thread) !== undefined))
   const latest = (items: Follow[]) => items.sort((a, b) => b.closed!.at.localeCompare(a.closed!.at))[0]
   const follow = latest(follows.filter(item => item.own)) ?? latest(follows)
   if ((outcome !== 'merged' && outcome !== 'closed') || !follow) return []
-  const number = pullNumber(follow.thread)!
-  const url = githubPage(repository, number, true)
+  const target = projectPull(follow.thread)
+  const number = target?.number ?? pullNumber(follow.thread)!
+  const url = githubPage(target?.repository ?? repository, number, true)
   const chinese = /\p{Script=Han}/u.test(request) && !/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(request)
   const text = chinese
     ? outcome === 'merged' ? `[PR #${number}](${url}) 已合并。` : `[PR #${number}](${url}) 已关闭，未合并。`
     : outcome === 'merged' ? `[PR #${number}](${url}) has merged.` : `[PR #${number}](${url}) was closed without merging.`
   // GitHub timelines and linked issues already show the merge or closure, so GitHub channels are skipped.
   return ticket.channels.filter(channel => channel.source !== SOURCE).map(channel => ({
-    id: key('pr-terminal', String(number), channel.source, JSON.stringify(channel.address), outcome), channel, text, kind: 'notice', ticketId: ticket.id }))
+    id: key('pr-terminal', target ? follow.thread : String(number), channel.source, JSON.stringify(channel.address), outcome), channel, text, kind: 'notice', ticketId: ticket.id }))
 }

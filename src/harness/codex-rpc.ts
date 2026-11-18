@@ -26,6 +26,7 @@ export class CodexSessions implements CodexPort {
   private creating = new Map<string, Promise<string>>()
   private closing = false
   private agentConfig = false
+  onApprovalUnavailable: (key: string, kind: 'command' | 'file-change') => void = () => {}
   private writes = new Map<string, Promise<void>>()
   onTool: (key: string, tool: string, args: unknown) => Promise<unknown> = async () => { throw new Error('Tools not initialized') }
   onTurn: (key: string, turn: any) => void = () => {}
@@ -91,6 +92,7 @@ export class CodexSessions implements CodexPort {
         }
       } else if (message.method === 'item/commandExecution/requestApproval' || message.method === 'item/fileChange/requestApproval') {
         // Native allow rules execute without a client prompt. Requests still requiring a human are declined headlessly.
+        if (entry) this.onApprovalUnavailable(entry[0], message.method === 'item/commandExecution/requestApproval' ? 'command' : 'file-change')
         this.write({ id: message.id, result: { decision: 'decline' } })
       } else {
         // Headless operation never silently grants approval. Workers report blocked instead.

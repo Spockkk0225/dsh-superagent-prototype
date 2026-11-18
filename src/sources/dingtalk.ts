@@ -6,18 +6,20 @@ import { family } from '../kv.ts'
 import type { SourceContext } from './host.ts'
 import type { SourceKind } from './kind.ts'
 import { DingTalkCards } from './dingtalk-cards.ts'
+import { projectMessageReceived } from './project-message.ts'
 
-const routes = family<Route, [string]>('dingtalk-route:')
+export const dingTalkRoute = family<Route, [string]>('dingtalk-route:')
 const tickets = family<string, [string, string]>('dingtalk-ticket:')
 const bodies = family<{ messageType: string; content: unknown }, [string]>('dingtalk-body:')
+const deliveries = family<{ messageId: string; format: string; transport: string; messageType: string; at: string }, [string]>('dingtalk-last-delivery:')
 
 const Message = z.object({ msgId: z.string().min(1), conversationId: z.string().min(1),
   conversationType: z.string(), isInAtList: z.boolean().optional(), senderStaffId: z.string().min(1),
-  senderCorpId: z.string().min(1), chatbotUserId: z.string().optional(), senderId: z.string().optional(),
+  senderCorpId: z.string().min(1), senderNick: z.string().optional(), chatbotUserId: z.string().optional(), senderId: z.string().optional(),
   robotCode: z.string().min(1), msgtype: z.string(), text: z.object({ content: z.string().optional() }).nullish(),
   content: z.unknown().optional(),
   createAt: z.number().optional(), sessionWebhook: z.string().url(), sessionWebhookExpiredTime: z.number() })
-export interface Route { webhook: string; expires: number; robotCode: string; conversationId: string }
+export interface Route { webhook: string; expires: number; robotCode: string; conversationId: string; corpId?: string }
 export const ticketReference = (text: string): string | undefined => /(?:^|\s)#([a-f0-9]{12,32})(?=\s|$|[，。,:：])/i.exec(text)?.[1]?.toLowerCase()
 export const label = (id: string): string => `#${id.slice(0, 12)}`
 
@@ -85,8 +87,9 @@ export function dingTalkTrigger(raw: unknown, context: SourceContext): { trigger
   const id = key('dingtalk', message.robotCode, message.conversationId, message.msgId)
   const quote = quotedMessage(head)
   const replyToBot = !!quote?.senderId && !!message.chatbotUserId && quote.senderId === message.chatbotUserId
+  const botQuote = replyToBot ? quotedText(quote?.content) : ''
   const directReference = ticketReference(text)
-  const reference = directReference ?? (replyToBot ? ticketReference(quotedText(quote?.content)) : undefined)
+  const reference = directReference ?? ticketReference(botQuote)
   const saved = reference ? context.state.get(tickets(message.conversationId, reference)) : undefined
   const matches = reference ? (saved ? [context.tickets.get(saved)].filter(ticket => !!ticket)
     : context.tickets.open().filter(ticket => ticket.id.startsWith(reference)))
@@ -101,13 +104,25 @@ export function dingTalkTrigger(raw: unknown, context: SourceContext): { trigger
       channel: { source: 'dingtalk', thread: `dingtalk:${conversation}`, address: { conversationId: conversation, triggerId: id } },
       meta: { conversationId: conversation, conversationType: '2', senderCorpId: message.senderCorpId, robotCode: message.robotCode,
         messageId: message.msgId, messageType: message.msgtype, chatbotUserId: message.chatbotUserId,
+        ...(message.senderNick?.trim() ? { senderNick: message.senderNick.trim().slice(0, 200) } : {}),
         ...(quote ? { replyToMessageId: quote.msgId, replyToMessageType: quote.msgType, replyToBot } : {}),
+        ...(botQuote ? { replyToBotText: botQuote.slice(0, 8000) } : {}),
         ...(reference ? { referenceSource: directReference ? 'text' : 'quote' } : {}),
         ...(reference ? { ticketReference: reference, referenceResolved: matches.length === 1 } : {}) } },
-    route: { webhook: message.sessionWebhook, expires: message.sessionWebhookExpiredTime, robotCode: message.robotCode, conversationId: conversation },
+    route: { webhook: message.sessionWebhook, expires: message.sessionWebhookExpiredTime, robotCode: message.robotCode,
+      conversationId: conversation, corpId: message.senderCorpId },
     ...(message.content !== undefined || quote ? { body: { messageType: message.msgtype,
       content: quote ? { content: message.content, quote } : message.content } } : {}),
   }
+}
+
+export interface DingTalkIntake {
+  conversationId?: string
+  forConversation?: (conversationId: string) => DingTalkIntake | undefined
+  project?: { id: string; repository: string | null }
+  onSender?: (trigger: Trigger) => string | undefined
+  onMeeting?: (trigger: Trigger) => string
+  discussion?: (trigger: Trigger) => (() => string) | undefined
 }
 
 /** Translates DingTalk Stream callbacks and group sends through the original SourceContext boundary. */
@@ -115,9 +130,11 @@ export class DingTalk {
   private readonly client: DWClient
   private readonly cards?: DingTalkCards
   private token?: { value: string; until: number }
+  private streamStatus?: ReturnType<typeof setInterval>
   constructor(private readonly context: SourceContext, private readonly credentials: { clientId: string; clientSecret: string },
     private readonly log: (event: string) => void,
-    private readonly http: typeof fetch = fetch, cardTemplateId?: string, robotName = 'Super agent') {
+    private readonly http: typeof fetch = fetch, cardTemplateId?: string, robotName = 'Super agent',
+    intake?: DingTalkIntake) {
     this.client = new DWClient({ ...credentials, debug: false, keepAlive: true })
     if (cardTemplateId) {
       this.cards = new DingTalkCards(context, cardTemplateId, () => this.accessToken(), http, credentials.clientId, robotName)
@@ -125,13 +142,34 @@ export class DingTalk {
     this.client.registerCallbackListener(TOPIC_ROBOT, async frame => {
       try {
         const parsed = dingTalkTrigger(JSON.parse(frame.data), context)
-        if (parsed) await context.atomic(() => {
-          context.state.set(routes(parsed.route.conversationId), parsed.route)
+        if (parsed && (!intake?.conversationId || intake.conversationId === parsed.route.conversationId)) await context.atomic(() => {
+          const { trigger } = parsed
+          const handlers = intake?.forConversation ? intake.forConversation(parsed.route.conversationId) : intake
+          if (handlers?.project) {
+            trigger.meta.projectId = handlers.project.id
+            trigger.meta.projectRepository = handlers.project.repository
+          }
+          const textCommand = (trigger.meta.messageType === 'text' || trigger.meta.messageType === 'richText')
+            && context.config('dingtalk') !== undefined
+          const enrollment = textCommand && handlers?.onSender && /^登记项目成员[。！!]?$/u.test(trigger.text)
+          const meeting = textCommand && handlers?.onMeeting && /^项目会议纪要(?:[：:]|\r?\n)/u.test(trigger.text)
+          const handle = enrollment ? handlers?.onSender : meeting ? handlers?.onMeeting : undefined
+          const discussion = context.config('dingtalk') !== undefined && !handle ? handlers?.discussion?.(trigger) : undefined
+          if (enrollment) trigger.meta.projectEnrollment = true
+          if (meeting) trigger.meta.projectMeeting = true
+          if (discussion) trigger.meta.projectDiscussion = true
+          context.state.set(dingTalkRoute(parsed.route.conversationId), parsed.route)
           // Preserve native content/attachment references in the original Source KV, separate from model text.
           if (parsed.body) context.state.set(bodies(parsed.trigger.id), parsed.body)
-          const result = context.receive(parsed.trigger)
+          const result = context.receive(trigger)
           if (result instanceof Promise) throw new Error('DingTalk intake must commit synchronously')
-          if (result === 'stored') this.received(parsed.trigger)
+          if ((handle || discussion) && result === 'filtered' && trigger.channel) {
+            const text = discussion ? discussion() : handle?.(trigger)
+            if (text) context.notify({ id: key('dingtalk-project-receipt', trigger.id), channel: trigger.channel, kind: 'notice', text })
+          } else if (result === 'stored') {
+            handlers?.onSender?.(trigger)
+            this.received(trigger)
+          }
           return result
         })
         // Acknowledge only after the event and pending work have committed.
@@ -145,7 +183,12 @@ export class DingTalk {
     }
   }
   /** Use the same receipt card for native messages and externally bound event requests. */
-  received(trigger: Trigger): void { this.cards?.received(trigger) }
+  received(trigger: Trigger): void {
+    if (this.cards) { this.cards.received(trigger); return }
+    if (trigger.source === 'dingtalk' && trigger.human && trigger.addressed && trigger.channel?.source === 'dingtalk')
+      this.context.notify({ id: key('dingtalk-intake-receipt', trigger.id), channel: trigger.channel, kind: 'notice',
+        text: '已收到这条请求，正在判断如何处理。' })
+  }
   bindWorkerDelivery(ticketId: string, deliveryId: string, triggerId: string, busy: boolean) {
     return this.cards?.delivery(ticketId, deliveryId, triggerId, busy)
   }
@@ -153,9 +196,17 @@ export class DingTalk {
     await this.client.connect()
     if (!this.client.connected) { this.client.disconnect(); throw new Error('DingTalk Stream did not connect') }
     this.context.report('dingtalk', { state: 'ready', detail: 'Stream connected' })
+    let connected = true
+    this.streamStatus = setInterval(() => {
+      if (connected === this.client.connected) return
+      connected = this.client.connected
+      this.context.report('dingtalk', connected ? { state: 'ready', detail: 'Stream connected' }
+        : { state: 'error', detail: 'Stream disconnected; waiting to reconnect' })
+    }, 5000)
+    this.streamStatus.unref()
     this.log('dingtalk_connected')
   }
-  stop(): void { this.client.disconnect() }
+  stop(): void { clearInterval(this.streamStatus); this.client.disconnect() }
   private async accessToken(): Promise<string> {
     if (this.token && this.token.until > Date.now()) return this.token.value
     const result = await this.http('https://api.dingtalk.com/v1.0/oauth2/accessToken', {
@@ -169,13 +220,22 @@ export class DingTalk {
   }
   async send(message: OutboundMessage): Promise<void> {
     const conversation = message.channel.address.conversationId!
-    const route = this.context.state.get(routes(conversation))
+    const route = this.context.state.get(dingTalkRoute(conversation))
     if (message.ticketId) this.context.state.set(tickets(conversation, message.ticketId.slice(0, 12)), message.ticketId)
     const eventLabel = message.channel.address.eventLabel
     const heading = [message.ticketId ? label(message.ticketId) : '', eventLabel ?? ''].filter(Boolean).join(' · ')
-    const text = heading ? `${heading}${eventLabel ? '\n' : ' '}${message.text}` : message.text
+    const mention = message.channel.address.mentionUserId
+    const body = heading ? `${heading}${eventLabel ? '\n' : ' '}${message.text}` : message.text
+    const text = mention ? `@${mention} ${body}` : body
+    const markdown = message.format === 'markdown'
+    const title = message.title ?? '项目更新'
     if (text.length > 4000) throw new Error('DingTalk result exceeds 4000 characters; provide a brief result and a link')
-    if (this.cards) { await this.cards.send(message); return }
+    // Project lifecycle notices are sent to the group without threading them under an old request card.
+    if (this.cards && (message.kind !== 'notice' || message.channel.address.triggerId || message.channel.address.cardId || message.ticketId)) {
+      await this.cards.send(message)
+      this.context.state.set(deliveries(conversation), { messageId: message.id, format: 'markdown', transport: 'ai-card', messageType: 'card', at: new Date().toISOString() })
+      return
+    }
     const url = route ? new URL(route.webhook) : undefined
     if (url && (url.protocol !== 'https:' || url.hostname !== 'oapi.dingtalk.com')) throw new Error('Invalid DingTalk session webhook')
     const token = await this.accessToken()
@@ -184,13 +244,16 @@ export class DingTalk {
     const response = await this.http(active ? url! : 'https://api.dingtalk.com/v1.0/robot/groupMessages/send', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-acs-dingtalk-access-token': token },
       signal: AbortSignal.timeout(15000), body: JSON.stringify(active
-        ? { msgtype: 'text', text: { content: text } }
-        : { robotCode: route?.robotCode ?? this.credentials.clientId, openConversationId: conversation, msgKey: 'sampleText', msgParam: JSON.stringify({ content: text }) }),
+        ? { ...(markdown ? { msgtype: 'markdown', markdown: { title, text } } : { msgtype: 'text', text: { content: text } }), ...(mention && { at: { atUserIds: [mention] } }) }
+        : { robotCode: route?.robotCode ?? this.credentials.clientId, openConversationId: conversation,
+          msgKey: markdown ? 'sampleMarkdown' : 'sampleText', msgParam: JSON.stringify(markdown ? { title, text } : { content: text }), ...(mention && { atUserIds: [mention] }) }),
     })
     const data = await response.json() as { errcode?: number; code?: string; processQueryKey?: string }
     if (!response.ok || (active ? data.errcode !== 0 : !!data.code || !data.processQueryKey)) {
       throw new Error(`DingTalk message send failed (HTTP ${response.status}); check robot permissions and group membership`)
     }
+    this.context.state.set(deliveries(conversation), { messageId: message.id, format: markdown ? 'markdown' : 'text',
+      transport: active ? 'session-webhook' : 'application-group-api', messageType: active ? markdown ? 'markdown' : 'text' : markdown ? 'sampleMarkdown' : 'sampleText', at: new Date().toISOString() })
   }
 }
 
@@ -200,9 +263,19 @@ export function dingTalkKind(send: (message: OutboundMessage) => Promise<void>):
     kind: 'dingtalk', title: { zh: '钉钉', en: 'DingTalk' },
     description: { zh: 'Stream 群内 @ 消息（所有消息类型）', en: 'Stream group mentions (all message types)' },
     schema: z.object({}).strict(), fields: [], health: ['dingtalk'],
-    scope: ({ meta }) => meta.conversationType === '2' ? { listened: true, observed: false, row: 'group' }
-      : { listened: false, reason: 'Only group messages are supported' },
+    projectEvents: [projectMessageReceived],
+    scope: ({ meta }) => {
+      if (meta.projectEnrollment === true) return { listened: false, reason: 'DingTalk project membership command' }
+      if (meta.projectMeeting === true) return { listened: false, reason: 'DingTalk meeting minutes for project review' }
+      if (meta.projectDiscussion === true) return { listened: false, reason: 'DingTalk project meeting discussion' }
+      return meta.conversationType === '2' ? { listened: true, observed: false, row: 'group' }
+        : { listened: false, reason: 'Only group messages are supported' }
+    },
     channel: {
+      formats: ['text', 'markdown'],
+      transports: ['session-webhook (text/markdown)', 'application-group-api (sampleText/sampleMarkdown)'],
+      documentation: ['https://open.dingtalk.com/document/orgapp/types-of-messages-sent-by-robots', 'https://open.dingtalk.com/document/robots/custom-robot-access'],
+      deliveryInfo: (host, channel) => channel.address.conversationId ? host.state.get(deliveries(channel.address.conversationId)) : undefined,
       send: async (_host, message) => { await send(message); return 'sent' },
       link: () => ({ url: '', label: { zh: '钉钉群', en: 'DingTalk group' } }),
     },

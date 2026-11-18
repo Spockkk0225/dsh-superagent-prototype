@@ -5,7 +5,7 @@ import { Button, Icon, InfoTip, Modal, StateDot, type DotState, type IconName } 
 import { inlines, linkify, markdownBlocks, type Inline } from './markdown.ts'
 import { useAction, usePanel, usePanelData } from './provider.tsx'
 import { settingsRoute, type SettingsGroup } from './route.ts'
-import { errorText, fullTime, readableMarkers, setupText, when } from './text.ts'
+import { errorText, fullTime, readableMarkers, setupText, when, type T } from './text.ts'
 
 const external = { target: '_blank', rel: 'noopener noreferrer' } as const
 
@@ -51,6 +51,11 @@ function Inlines({ parts }: { parts: Inline[] }) {
 /** Renders a safe Markdown subset (headings, lists, paragraphs, bold, inline code, links) without interpreting raw HTML. */
 export function MarkdownLite({ text }: { text: string }) {
   const { t } = usePanel()
+  return <MarkdownContent text={text} t={t} />
+}
+
+/** The same report renderer can be used by the standalone workspace without the panel provider. */
+export function MarkdownContent({ text, t }: { text: string; t: T }) {
   return <div className="dt-md">{markdownBlocks(readableMarkers(t, text)).map((block, index) => {
     if (block.kind !== 'list') return <p key={index} className={block.kind === 'heading' ? 'dt-md-heading' : undefined}><Inlines
       parts={inlines(block.text)} /></p>

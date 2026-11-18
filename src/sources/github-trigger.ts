@@ -4,6 +4,18 @@ import { key, type ChannelRef, type Trigger } from '../core/index.ts'
 import { escapeRegExp, sameName } from '../infra/text.ts'
 
 export const SOURCE = 'github'
+export const repositoryThreadId = (repository: string, number: number, pr: boolean): string =>
+  `${repository.toLowerCase()}/${pr ? 'pull' : 'issues'}/${number}`
+
+/** Project repository observations retain their own identity and cannot be mistaken for a deployment-wide request. */
+export function repositoryEvent(trigger: Trigger, repository: string): Trigger {
+  const number = trigger.meta.number
+  const id = typeof number === 'number' ? repositoryThreadId(repository, number, trigger.meta.isPr === true)
+    : `${repository}/${trigger.threads[0]!.id}`
+  return { ...trigger, id: key('github-repository', repository, trigger.id), threads: [{ source: SOURCE, id }],
+    ...(trigger.channel && { channel: { ...trigger.channel, thread: `${SOURCE}:${id}`, address: { ...trigger.channel.address, repository } } }),
+    meta: { ...trigger.meta, repository, repositoryObservation: true } }
+}
 /** GitHub reply address: issue/PR conversation, or a review thread when `url` points at a discussion comment. */
 export const githubChannel = (number: number, url?: string): ChannelRef =>
   ({ source: SOURCE, thread: `github:${number}`, address: { number: String(number), ...(url ? { url } : {}) } })

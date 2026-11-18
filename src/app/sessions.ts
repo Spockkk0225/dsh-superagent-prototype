@@ -19,6 +19,7 @@ import { SKILL_PREFIX, type PromptVersion, type Prompts } from './prompts.ts'
 import type { Store } from './store.ts'
 import { KV } from '../kv.ts'
 import type { RegisterTool, Tool } from './tools/tool.ts'
+import type {} from './session-binding.ts'
 
 /** Host dependencies used by `Sessions`. */
 export interface SessionsHost {
@@ -266,10 +267,10 @@ export class Sessions {
     if (!master && !ticket) { this.limitSubagent(agent); return }
     const binding: SessionBinding = { disposers: [] }
     this.bindings.set(agent, binding)
-    const codex = this.ctx.get('codexHarness')
-    if (codex) {
+    const transport = this.ctx.get('agentSessionBinding')
+    if (transport) {
       // Keep the original prompts, role tools and report/reply flow; only the host transport differs.
-      binding.disposers.push(codex.bind(agent, () => {
+      binding.disposers.push(transport.bind(agent, () => {
         const version = this.promptFor(agent, true)
         const current = ticket && host.store.tickets.get(ticket.id)
         return `[dsh-superagent prompt revision ${version.revision}]\n${host.prompts.compose(version.config,

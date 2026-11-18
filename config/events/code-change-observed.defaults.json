@@ -1,0 +1,5 @@
+{
+  "on": {
+    "code.change.observed": true
+  }
+}

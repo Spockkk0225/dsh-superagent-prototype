@@ -167,6 +167,8 @@ export const githubThreadContext: ThreadContext<unknown> = {
       const message = { id: trigger.url ?? trigger.id, from: 'CI', at: trigger.at, text: trigger.text, bot: true as const }
       return { messages: [message], body: { status: 'branch_ci', messages: [message] }, status: 'branch_ci' }
     }
+    if (trigger.meta.repositoryObservation === true && typeof trigger.meta.repository === 'string')
+      commands = commands.forRepository(trigger.meta.repository)
     const number = Number(trigger.meta.number)
     if (trigger.meta.kind === 'inline' && typeof trigger.meta.commentId === 'number') {
       const thread = await reviewThread(commands, number, trigger.meta.commentId)

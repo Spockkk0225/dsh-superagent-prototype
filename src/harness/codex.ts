@@ -9,10 +9,10 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { Store } from '../app/store.ts'
 import type { Runtime } from '../app/runtime.ts'
 import type { Tool } from '../app/tools/tool.ts'
-import { family } from '../kv.ts'
+import type { AgentSessionBinding } from '../app/session-binding.ts'
+import { family, KV } from '../kv.ts'
 import { CodexSessions, type CodexSandbox } from './codex-rpc.ts'
 
-declare module '@deepseek-ai/cordis' { interface Context { codexHarness: CodexHarness } }
 
 const stateKey = family<any, [string, string]>('codex:')
 interface SavedSession {
@@ -33,7 +33,10 @@ export interface CodexOptions {
 const textOf = (message: UserMessage) => message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
 
 /** No ticket, admission, report or reply decisions live here: this translates host sessions/events into Codex RPC. */
-export class CodexHarness {
+export class CodexHarness implements AgentSessionBinding {
+  readonly runner = 'Codex'
+  capabilities() { return { runner: this.runner, sandbox: this.options.sandbox, nativeApprovals: 'unavailable' as const,
+    guidance: '当前无原生审批桥接。需要提权的请求由无头运行时拒绝，不是用户拒绝。群内同意不能修改原生沙箱或批准命令；应由本机管理者核对具体操作、配置明确的命令规则，或在本机完成该步骤后提供结果。' } }
   readonly agents = new Map<string, HostAgent>()
   readonly rpc: CodexSessions
   private readonly bindings = new Map<string, Binding>()
@@ -57,6 +60,8 @@ export class CodexHarness {
       get: <T>(kind: string, id: string) => this.store.get(stateKey(kind, id)) as T | undefined,
       set: (kind, id, value) => { this.store.set(stateKey(kind, id), value) },
     }, options.binary, options.model, options.sandbox)
+    this.rpc.onApprovalUnavailable = (sessionId, kind) => this.store.set(KV.sessions.unavailableAction(sessionId),
+      { runner: this.runner, kind, at: new Date().toISOString() })
     this.rpc.onTool = async (id, name, args) => {
       const binding = this.bindings.get(id)
       const problem = binding?.guard()
@@ -100,7 +105,7 @@ export class CodexHarness {
       void this.runtime.stop().finally(() => { process.exitCode = 1 })
     }
     const provide = (name: string, value: unknown) => { ctx.reflect.provide(name, value) }
-    provide('codexHarness', this)
+    provide('agentSessionBinding', this)
     provide('agents', this.agents)
     provide('workspaceRegistry', { create: async (cwd: string) => ({ id: cwd }) })
     provide('permissionPresets', { set: () => {} }) // Codex sandbox is explicit; never upgrade to DSH's full-access preset.
@@ -227,12 +232,16 @@ export class CodexHarness {
       // Role instructions and original operational skills are composed by Sessions/Prompts, not replaced here.
       const fullAccess = this.options.sandbox === 'danger-full-access' && state.preset !== 'dsh-superagent-router'
       const prompt = `${instructions}\n${skills}\nThis host is Codex. Subagents are unavailable. Use the registered orchestrator tools unchanged. `
+        + `Runtime capabilities: ${JSON.stringify(this.capabilities())}. Treat these as operational facts. Do not ask for a chat approval that this runtime cannot execute. `
         + (fullAccess ? 'The operator configured danger-full-access. Commands execute directly on the host without sandbox restrictions or interactive approval. '
           : 'Commands use the native Codex sandbox and operator-configured execpolicy rules. An authentication error inside the sandbox can mean OS credential-store access was denied; it does not establish that the host login expired. '
             + 'Use configured native command rules before asking a person to log in again. Logging in or reinstalling a CLI inside the sandbox does not change its permissions.')
-      await this.rpc.ensure(agent.id, state.cwd, prompt,
+      const externalId = await this.rpc.ensure(agent.id, state.cwd, prompt,
         binding.tools.map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.schema.toJSONSchema() })),
         state.preset === 'dsh-superagent-router')
+      const sessionRef = KV.sessions.external(agent.id)
+      if (this.store.get(sessionRef)?.externalId !== externalId)
+        this.store.set(sessionRef, { runner: this.runner, externalId })
       if (!state.nextStep.includes(message) && !state.nextTurn.includes(message)) return
       const notices = [...state.notices]
       const text = [...notices.map(textOf), textOf(message)].join('\n\n')

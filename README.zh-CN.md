@@ -4,6 +4,7 @@
 
 ## 当前能力
 
+- 在本地项目页管理当前目标、里程碑、任务依赖、待决事项和成员。拖动看板或优先级矩阵上的卡片更新任务。任务可以关联 GitHub Issue 和 Super Agent 工单。
 - 使用 Codex CLI app-server 执行主 Agent 和 Worker 会话，每个任务使用独立 Git worktree，复用原有任务编排、授权、持久化和 Outbox。
 - 接收钉钉群内 @ 机器人的消息，支持通过任务 ID 继续对话；可选 AI 卡片累计展示来源回执、Agent 确认和最终结果。
 - 支持个人 GitHub CLI 认证，以及按仓库选择 installation 的 GitHub App 认证，适用于 upstream/fork 协作。
@@ -63,6 +64,57 @@ pnpm start:codex -- --env-file .env
 - GitHub App：将 `SUPERAGENT_GITHUB_AUTH` 设为 `app`，填写 App ID、私钥绝对路径和 installation 配置。多仓库使用 `SUPERAGENT_GITHUB_INSTALLATIONS`，与单仓库 `SUPERAGENT_GITHUB_INSTALLATION_ID` 二选一。私钥放在 checkout 外。upstream/fork 的权限、凭据路由及已有安装的切换步骤见[适配说明](docs/009-codex.md)。
 
 ## 配置、升级和迁移
+
+### 项目管理
+
+服务启动后打开 [项目页](http://127.0.0.1:3082/orchestrator/projects)，也可以在 DeepSeek Harness 管理面板打开「项目」标签。Codex 部署使用自定义端口时，访问 `SUPERAGENT_PORT` 对应的地址。只试用项目管理时，可以使用同一个状态目录单独启动本地界面，无需配置钉钉、GitHub 或 Codex 凭据。
+
+```sh
+pnpm build
+pnpm start:codex --projects-only
+```
+
+用 `SUPERAGENT_PROJECT_PREVIEW_IP` 指定服务所在电脑的 IPv4 地址，再以 `--projects-only` 启动，即可用该地址打开项目开发预览。设 `SUPERAGENT_PROJECT_PREVIEW_LAN=1` 并重启后，该网卡所在 IPv4 网段内的机器也可以访问和编辑项目。设回 `0` 并重启即可恢复仅本机访问。
+
+项目管理模式的公网访问默认关闭。在本机 env 文件中把 `SUPERAGENT_PROJECT_PUBLIC_ENABLED` 设为 `1`，填入实际 HTTPS 域名及登录密码，然后重启项目服务。密码可用 `openssl rand -hex 24` 生成。关闭时将开关改回 `0` 并重启。
+
+```dotenv
+SUPERAGENT_PROJECT_PUBLIC_ENABLED=1
+SUPERAGENT_PROJECT_PUBLIC_ORIGIN=https://projects.example.com
+SUPERAGENT_PROJECT_PUBLIC_PORT=3092
+SUPERAGENT_PROJECT_PUBLIC_USER=projects
+SUPERAGENT_PROJECT_PUBLIC_PASSWORD=请替换为生成的密码
+```
+
+保持现有的 `SUPERAGENT_STATE_DIR`，以 `pnpm start:codex --env-file /absolute/path/to/env --projects-only` 启动。将公网 HTTPS 反向代理的上游指向同一台电脑的 `127.0.0.1:3092`，保留外部 `Host` 和浏览器的 `Origin`，并由代理根据 TLS 连接设置 `X-Forwarded-Proto: https`。例如，在可从公网访问且域名已指向的电脑上使用 Caddy。 [Caddy HTTPS](https://caddyserver.com/docs/automatic-https) · [反向代理配置](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
+
+```caddyfile
+projects.example.com {
+    reverse_proxy 127.0.0.1:3092
+}
+```
+
+在浏览器打开实际域名下的 `/orchestrator/projects`，用配置的账号登录。该账号拥有项目管理权限，可查看和编辑项目、任务和成员。Agent 完整服务仍使用本机管理入口。
+
+独立项目页默认使用简体中文，右上角可以切换语言，浏览器会记住选择。从左栏选择项目，再打开该项目的任务、成员、里程碑、决定、Agent 执行记录或 Agent 状态。成员页可以添加和编辑成员、查看每人负责的任务。团队名册中手工登记的外部账号会标为未验证。
+
+每次将任务交给 Agent 后，系统会生成一条有编号的执行记录，也叫工单。打开「Agent 执行记录」可以看 Agent 正在做什么、需要你回答什么，以及已交付的报告或 PR。交付由项目成员回到关联任务中验收。
+
+项目页提供「看板」「优先级矩阵」「列表」。在看板拖动卡片可以改状态，在矩阵拖动可以改优先级。点开任务即可查看「来源」「Agent 执行」「交付与验收」。
+
+普通任务的 GitHub Issue 链接可留空，也可以之后补上。用「从 Issue 建任务」时需要填写链接。完整服务可以读取配置仓库的 Issue 标题，同一个项目中新关联的 Issue 对应一项任务。旧项目里的 Issue 链接显示为历史参考。在「Agent 执行」中可以从列表关联已有工单，与任务的 Issue 匹配的记录排在前面。工单的报告、提问和关联的 PR 会显示在同一任务里，项目任务由团队验收后完成。
+
+页面显示「当前在项目管理模式」时，可以管理任务和查看已有工单。要从任务派发给 Agent，先退出该模式，再配置 `SUPERAGENT_REPOSITORY`、GitHub CLI 和 Codex CLI，用相同的 `SUPERAGENT_STATE_DIR` 启动完整服务。钉钉凭据是可选的。完整服务的「Agent 状态」页会刷新主会话忙闲、全局 Worker 并发和排队数。页面显示「Agent 可接单」后，在任务里点「交给 Agent」。工单等人回答时，可以在同一任务里回复。
+
+项目数据与工单存在同一份 `orchestrator.sqlite`。如需迁移已有 Mission Control 数据，先停止使用目标状态目录的 Super Agent 实例，然后运行以下命令，再用同一状态目录启动服务。
+
+```sh
+pnpm import:mission-control /path/to/mission-control/mission-control/data /path/to/super-agent-state
+```
+
+导入读取项目、任务及任务归档、目标和项目决定。目标映射为里程碑，第一个顶层目标填入项目的当前目标。未归入现有项目的记录进入 `Mission Control Inbox`。已有项目导入记录会被跳过。原有 Agent 分派附在任务说明里，人员由本地操作员分派。跨项目、缺失或循环的任务依赖会使导入失败，修正源快照后可以重跑。 [项目接口与迁移说明](docs/009-codex.md#project-management)
+
+### 运行设置
 
 首次启动将仓库、prepare 命令和授权等配置写入状态库。后续启动保留已有设置；修改 env 文件不会替换已经保存的 Source 设置，应通过原有 settings API 修改。管理 API 默认位于 `http://127.0.0.1:3082/orchestrator/api/`，此入口不提供 DSH 桌面/Web UI 外壳。
 

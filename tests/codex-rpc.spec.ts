@@ -48,10 +48,12 @@ it('creates a no-subagent session, dispatches scoped tool calls, streams input a
   expect(tool).toHaveBeenCalledOnce()
   expect(store.get(kv('codex-thread', 'worker:one'))).toBe(id)
   const write = vi.spyOn(sessions as any, 'write')
+  const unavailable = sessions.onApprovalUnavailable = vi.fn()
   for (const method of ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval']) {
     await sessions.message({ id: 'human-approval', method, params: { threadId: id } })
     expect(write).toHaveBeenLastCalledWith({ id: 'human-approval', result: { decision: 'decline' } })
   }
+  expect(unavailable.mock.calls).toEqual([['worker:one', 'command'], ['worker:one', 'file-change']])
 })
 it.skipIf(!process.env.CODEX_GH_SMOKE_BINARY)('lets two fresh sandboxed workers use host GitHub auth through native allow rules', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'codex-gh-auth-'))

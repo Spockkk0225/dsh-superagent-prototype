@@ -108,7 +108,7 @@ describe('Source registry', () => {
     expect(sources.repliesTo({ ...reply, source: 'github' })).toBeUndefined()
   })
   it('finds what a search query names in each kind\'s terms', () => {
-    const sources = new SourceRegistry(() => SettingsSchema.parse({}))
+    const sources = new SourceRegistry(() => SettingsSchema.parse({ sources: { github: { enabled: true, config: { repository: 'acme/widgets' } } } }))
     sources.register(feishuKind); sources.register(githubKind)
     expect(sources.find('#12')).toEqual({ threads: ['github:12'], terms: [] })
     expect(sources.find('https://github.com/acme/widgets/pull/7#issuecomment-3')).toEqual({ threads: ['github:7'], terms: [] })

@@ -22,8 +22,6 @@ npm run build
 Set the installation variables **before the first start**; see [.env.template](../.env.template). Credentials may remain in the existing env file:
 
 ```sh
-SUPERAGENT_REPOSITORY=/absolute/path/to/local/neug \
-SUPERAGENT_GITHUB_REPOSITORY=alibaba/neug \
 SUPERAGENT_STATE_DIR="$PWD/state-codex" \
 CODEX_BINARY=/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex \
 CODEX_MODEL=gpt-6.1-sol \
@@ -46,6 +44,32 @@ To explicitly run main and Worker session commands directly on the host, set `CO
 These steps start a fresh installation. Runtime state, credentials, ticket worktrees and Codex conversation history are not included in Git. Continuing old tickets requires a separate coordinated migration of the state database, worktrees and Codex history, with their saved paths accounted for; copying just the database is insufficient. An existing state directory also retains its saved installation settings, including the old prepare command's repository path.
 
 ## Settings and state
+
+### Project management
+
+In the configured project group, a project member can mention the robot with `项目会议纪要` followed by a newline and the minutes. The robot puts agreed actions on the board and replies with the changes. When an action needs clarification, the robot asks one specific question. Mention the robot with `会议反馈：…` or reply to the minutes to supply the missing detail and resume planning. Project members can also use `更新计划` or the project Decisions page to request an update. A member can confirm kickoff in the group, and an operator can set the same project status on the board.
+
+When `DINGTALK_OPEN_CONVERSATION_ID` names a group with no saved project, a registered member can submit the first minutes after the team agrees what project to start. Include a `项目名称：…` line. If the team has picked an existing GitHub repository, include one `GitHub 仓库：owner/repo` line or its GitHub URL. Omit that line when the repository is undecided; it can be set later. The service creates a project awaiting kickoff, uses the member directory to resolve named assignees and reviewers for that first meeting, and then uses the ordinary planning workflow.
+
+The project's optional GitHub repository and DingTalk group are stored in SQLite. Edit those fields in the project workspace. Each dispatched task uses the repository saved at dispatch and gets its own checkout. A project without a repository gets an isolated local workspace. When GitHub repository streams are enabled, linked repositories join the poller automatically. Repositories shared by several projects are polled once. New project repository events use repository-qualified thread identities, with independent cursors and health. These observations are recorded and can reach subscribed tickets. New work still comes from the existing project workflow and the configured GitHub source's admission rules.
+
+Task details let a member copy the title, description, acceptance criteria and a stable task reference. A project member can quote a task message and ask the DingTalk robot to create an Issue in ordinary language, or mention the task by name. When several tasks are plausible, the robot asks which one. Creation uses the project's linked repository and records the resulting Issue URL on the task. An existing Issue URL can also be recorded manually. Tasks can be managed with or without a linked Issue.
+
+After kickoff, a member can ask the robot to start an Agent task by replying to a task message or naming the task. The command uses the same operation as **Run task** on the board, which creates an execution ticket and sets the task to **In progress** together. A member can also explicitly confirm kickoff and request dispatch in one message. Combined kickoff and dispatch commit together, and task dependencies and pending decisions have to be resolved. A request to start only a task still requires kickoff.
+
+A successfully ended ticket with a ready report publishes the durable `delivery.ready` event. Its handler moves the current task into review and queues a notice in the linked DingTalk group, including for manually dispatched tasks. **Automatic progress** controls dispatch of ready Agent tasks and group notices for owners of newly unblocked human tasks. Mark a task complete after review to release its dependents. See `docs/events/README.zh-CN.md` for the JSON API, default values, and current implementation stages.
+
+Open **Agent Status** from the workspace sidebar to see the shared runtime, DingTalk connection, GitHub authentication and repository polling. The page is available before any projects exist. Use **Local Agents** there to scan the machine and see the robot Agent. Codex currently handles meeting planning, orchestration, and coding work. Other detected CLIs appear in the inventory until their full runtime is integrated. Each project shows its repository and task execution records in its own workspace.
+
+Open `http://127.0.0.1:3082/orchestrator/projects` for the project workspace. The full Codex service and the DSH panel expose the same project API and state. To use the standalone project workspace without any source credentials, run `pnpm build` followed by `pnpm start:codex --projects-only`. Both modes use `SUPERAGENT_STATE_DIR` and its exclusive lock. Stop one mode before starting the other with the same state directory.
+
+Project writes use the existing loopback management API and `X-Orchestrator-Request: 1`. `GET /projects` lists the workspaces, `POST /projects` creates one, and `GET /projects/:id` returns its board. Submit a change to `POST /projects/:id/changes` using the current project revision and a change such as `{"kind":"task","value":{"title":"Collect evidence"}}`. The API returns 409 for a stale revision. Member records are available at `/members` and project membership is managed through project changes.
+
+Issue links belong to tasks and use public GitHub URL syntax. The full service can look up issue titles in the configured repository. A project allows one newly linked task per canonical Issue URL. The task workspace shows its issue, linked execution ticket, worker reports, questions, and PRs. The ticket chooser lists recent tickets in the shared database and prioritizes matching issue URLs. An operator can dispatch a task, send a follow-up, or stop its locally launched ticket when the full service is running. Dispatch uses the original request source gate and transactionally binds the new ticket to the project task. Acceptance of the project task remains an operator action.
+
+Full Codex startup supports the project workspace with both DingTalk environment fields unset. Provide the checkout, authenticated GitHub CLI, and Codex CLI as usual. The operator submits via the local request channel, which records its messages in the existing outbox. The project page displays the persisted execution state directly.
+
+After building, run `pnpm import:mission-control /path/to/mission-control/data /path/to/state` against an existing, stopped Super Agent state directory. Copy a consistent snapshot of the legacy data directory before importing. The command writes planning records in one transaction, skips projects already imported from that workspace, and reports the imported counts. Agent roles from old task assignments become descriptive text. Goals flatten into milestones, and a first top-level goal supplies the current objective. Claude execution state, field operations and inbox messages stay in the source directory.
 
 ### Local request delivery
 
