@@ -29,6 +29,10 @@ pnpm start:codex --projects-only
 
 Open the [project workspace](http://127.0.0.1:3082/orchestrator/projects). This mode supports local project and member management without external accounts. For Agent execution, group chat, or repository integration, follow the deployment guide. [Deploy Super-Org](docs/deployment.zh-CN.md)
 
+## Try the 2048 tutorial
+
+Start with meeting notes from a project chat, run a task, then see how human acceptance unlocks the next one. The walkthrough includes copyable messages and an animated side-by-side view of the chat and project board. [2048 tutorial · 中文](docs/tutorials/2048.zh-CN.md)
+
 ## Documentation
 
 The [documentation index](docs/README.md) also lists the event reference and verification notes.

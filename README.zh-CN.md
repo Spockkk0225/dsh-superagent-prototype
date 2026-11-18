@@ -29,6 +29,10 @@ pnpm start:codex --projects-only
 
 打开[项目工作台](http://127.0.0.1:3082/orchestrator/projects)，体验本地项目和成员管理。需要 Agent 执行、群聊或仓库联动时，按部署文档启动完整服务。 [部署 Super-Org](docs/deployment.zh-CN.md)
 
+## 跟着 2048 示例走一遍
+
+从项目群里的一份纪要开始，带团队从分工走到验收。教程附可复制的群消息和动图，可以对照看板观察 A 验收后 B 如何开工。 [2048 图文教程](docs/tutorials/2048.zh-CN.md)
+
 ## 文档
 
 [文档索引](docs/README.md)还收录各类事件参考和验证记录。
