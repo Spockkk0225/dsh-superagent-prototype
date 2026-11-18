@@ -44,6 +44,24 @@ it('paginates history with a stable sequence cursor without skipping equal times
   expect(second.entries).toHaveLength(11)
   expect(new Set([...first.entries, ...second.entries].map(item => item.event.seq)).size).toBe(111)
 })
+it('links only explicit event and run identities when unrelated messages have no cause ID', async () => {
+  const propose = vi.fn().mockResolvedValue({ calls: [], reply: '已读取，未修改任务。' })
+  const h = host = await startRuntime(undefined, undefined, undefined, undefined, undefined, { name: 'History Agent', propose })
+  const projects = new Projects(h.runtime.store)
+  const project = projects.create(ProjectInput.parse({ name: 'Independent messages', autoAdvance: false }))
+  for (const messageId of ['first-message', 'second-message']) {
+    await h.api('POST', `projects/${project.id}/messages`, { messageId, text: '只读取现状' })
+    await h.runtime.idle()
+  }
+  const runs = h.runtime.projectAgent!.runs(project.id)
+  const history = h.runtime.projectHistory.view(project.id)
+  for (const messageId of ['first-message', 'second-message']) {
+    const run = runs.find(run => run.message.messageId === messageId)!
+    expect(history.entries.find(item => item.event.id === messageId)?.decisions.map(item => item.id)).toEqual([run.id])
+    expect(history.entries.filter(item => item.event.causeId === run.id).every(item => item.decisions.length === 1 && item.decisions[0]!.id === run.id)).toBe(true)
+  }
+  expect(history.entries.find(item => item.event.type === 'project.changed')?.decisions).toEqual([])
+})
 it('rolls back project changes and their audit facts together', async () => {
   const h = host = await startRuntime()
   const projects = new Projects(h.runtime.store)

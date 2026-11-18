@@ -1,76 +1,128 @@
 # 项目事件配置
 
-项目事件由 SuperAgent 后台消费。队列写在现有 SQLite 的 `project_event` 表中，按入队序号处理。队列空闲时保持等待，入队后自动唤醒，消费事件无需调用模型。耗时工作通过已有 `Effects` 和 `Outbox` 继续执行。
+配置按**已注册事件源**组织。每个来源维护自己的事件类型、数据校验、默认值和说明；来源名称与类别没有固定枚举。GitHub 使用 `sources.github`，未来安装 GitLab 适配器后使用 `sources.gitlab`。两者即使发布同一种通用事件，也可以独立设置。
 
-## 统一 JSON
+所有来源共用现有 SQLite 有序事件队列、事务、Effects 和 Outbox。来源负责接入并描述事实，事件处理器负责状态与动作，Agent 根据上下文决定需要哪些已发布工具。配置文件的组织不新增一套流程引擎，也不改变人工验收授权。
 
-默认配置见 [project-workflow.defaults.json](../../config/project-workflow.defaults.json)。空对象也有效，事件采用各自内置的默认值。
+## 按来源维护一份 JSON
+
+当前各来源的默认文件如下。业务行为参考文档可以覆盖多个来源，配置归属由注册表决定。
+
+| 注册来源 | 默认配置 | 覆盖的事件与说明 |
+| --- | --- | --- |
+| `github` | [GitHub 默认值](../../config/events/github.defaults.json) | Issue / PR 观察，[仓库事件](repository.zh-CN.md) |
+| `repository` | [仓库同步默认值](../../config/events/repository.defaults.json) | 验收后关闭负责解决的 Issue、关联事实，[仓库事件](repository.zh-CN.md) |
+| `dingtalk` | [钉钉默认值](../../config/events/dingtalk.defaults.json) | 群消息驱动 Agent，[沟通事件](communication.zh-CN.md) |
+| `request` | [本地请求默认值](../../config/events/request.defaults.json) | 网页与本地消息驱动 Agent，[沟通事件](communication.zh-CN.md) |
+| `communication` | [沟通偏好默认值](../../config/events/communication.defaults.json) | 保存格式与风格，[沟通事件](communication.zh-CN.md) |
+| `execution` | [执行默认值](../../config/events/execution.defaults.json) | 交付、阻塞与通知，[交付](delivery.zh-CN.md)及[跟进](follow-up.zh-CN.md) |
+| `review` | [验收默认值](../../config/events/review.defaults.json) | 提交、通过、退回，[交付与验收](delivery.zh-CN.md) |
+| `project` | [项目默认值](../../config/events/project.defaults.json) | 任务就绪与依赖解除，[自主跟进](follow-up.zh-CN.md) |
+| `clock` | [时钟默认值](../../config/events/clock.defaults.json) | 一次检查到期，[自主跟进](follow-up.zh-CN.md) |
+
+这张表是当前安装情况，不是来源白名单。每个文件从同一注册表导出；自动测试检查文件与注册默认值一致。新增来源注册后，查询接口立即返回该来源的独立配置模板，不需要修改配置解析器或增加事件名判断。
+
+例如 GitHub 的一项配置：
 
 ```json
 {
-  "sources": {},
-  "on": {}
+  "sources": {
+    "github": {
+      "on": {
+        "code.change.observed": {
+          "enabled": true,
+          "description": "核对关联 PR 的合并状态和代码版本，证据齐备后请求人工验收。"
+        }
+      }
+    }
+  }
 }
 ```
 
-`sources` 的键是已安装的事件源名称。每个来源可用 `enabled` 开关监听结果的处理，用 `watch` 选择适配器提供的类别。省略时采用来源默认行为。`on` 的键是事件名，布尔值开关其反应。支持 Agent 指导的事件还可以用自然语言字符串覆盖内置指导。每个实际接入的事件都有自己的默认配置和说明，查询 API 同时返回可用类别、事件说明和有效默认值。
+每种事件的 `description` 可以省略或为空字符串。生成模板时默认填写注册的说明，帮助团队理解具体用途；它是解释文字。`enabled` 控制开关，支持 Agent 决策的事件可通过 `instruction` 设置指导；后台确定性处理器不接受 Agent 指导。说明文字不会被当作执行指令。
 
-配置只控制新项目事件的处理，已有消息通道的登录和连接设置继续由来源设置管理。停用的事件仍留时间线，显示 `ignored`，重新启用后处理新到达的事件。历史记录保留原处理结果。
+来源可使用 `enabled` 整体停用，或用 `watch` 选择该适配器注册的观察类别。具体类别由注册信息提供；更换提供者时使用它自己的类别及事件目录。
 
-## 已接入的事件
+## 保存与生效
 
-| 事件 | 默认值 | 配置说明 |
-| --- | --- | --- |
-| `code.change.observed` | 开启 | [代码交付事实](code-change-observed.zh-CN.md)，核验真实 PR 合并与报告，保留代码快照 |
-| `issue.observed` | 开启 | [Issue 状态](issue-observed.zh-CN.md)，记录远端关闭及重开，不代替人工验收 |
-| `issue.close.requested` | 开启 | [验收后同步](issue-close-requested.zh-CN.md)，仅关闭任务明确负责解决的 Issue，保留失败及重试结果 |
-| `delivery.ready` | 开启 | [工单交付就绪](delivery-ready.zh-CN.md)，成功交付后移到待验收并通知任务负责人 |
-| `task.ready` | 开启，附默认 Agent 指导 | [就绪与依赖解除](task-ready.zh-CN.md)，授权后唤起 Agent 判断如何推进 |
-| `check.due` | 开启，附默认 Agent 指导 | [预约检查](check-due.zh-CN.md)，持久化的一次性时间事件，空闲时不调用模型 |
-| `task.blocked` | 开启，附默认 Agent 指导 | [工单受阻与待回答](task-blocked.zh-CN.md)，向项目群通知实际阻塞原因及问题 |
-| `conversation.preferences.update_requested` | 开启 | [会话沟通偏好](conversation-preferences.zh-CN.md)，持久保存格式和风格，通过统一输出层执行 |
-| `project.message.received` | 开启，附默认 Agent 指导 | [项目消息](project-message.zh-CN.md)，结合原文和引用组合[项目工具](project-tools.zh-CN.md)处理，并回复实际结果 |
-| `review.requested` | 开启 | [请求验收](review-requested.zh-CN.md)，保存交付快照并通知负责人 |
-| `review.accepted` | 开启 | [验收通过](review-accepted.zh-CN.md)，核对当前版本与负责人，记录依据并完成任务 |
-| `review.rejected` | 开启 | [退回交付](review-rejected.zh-CN.md)，保留原因及历史，等待新交付 |
+`GET /orchestrator/api/projects/workflow` 返回：
 
-## 读取与保存
+- `config` / `revision`：SQLite 中当前配置及修订号。
+- `sources[]`：已注册来源、该来源配置、观察类别、各事件实际生效值和说明。
+- `sources[].defaults`：该来源独立默认 JSON；`defaults`：当前已安装来源的完整默认 JSON。
+- `events[]`：通用事件契约与全局兼容层的有效默认值；来源具体有效值以 `sources[].events` 为准。
 
-交付与验收共用下列事件。队列按序确认事实，群里的自然语言由所选 Agent 判断后调用工具，网页使用同一事件入口。
+当前配置只在原来的 SQLite 中维护一份。分来源 JSON 是便于独立维护、导入和备份的文件表示，通过管理 API 保存到数据库。`config/project-workflow.defaults.json` 的空配置采用各来源内置默认值；完整带描述的配置从上述接口获取，会跟随当前注册内容生成。
 
-```mermaid
-flowchart TD
-  W[当前工单成功报告] --> D[delivery.ready]
-  D --> R[review.requested]
-  H[人工交付及证据] --> R
-  R --> P[保存本版快照 · 待验收 · 通知负责人]
-  P --> F[群里反馈 / 看板操作]
-  F --> A[review.accepted]
-  F --> B[review.rejected]
-  A --> C[记录依据 · 任务完成]
-  B --> E[记录退回原因 · 进行中]
-  E --> N[新证据 / 新执行]
-  N --> R
+推荐只保存当前来源，避免覆盖其他模块：
+
+```http
+PUT /orchestrator/api/projects/workflow/sources/github
+X-Orchestrator-Request: 1
+Content-Type: application/json
 ```
 
-完整服务提供以下本地管理 API。请求头沿用 `X-Orchestrator-Request: 1`，地址使用当前服务端口。
+```json
+{
+  "revision": 1,
+  "config": {
+    "on": {
+      "code.change.observed": {
+        "enabled": true,
+        "description": "记录代码交付证据。"
+      }
+    }
+  }
+}
+```
 
-| 接口 | 内容 |
-| --- | --- |
-| `GET /orchestrator/api/projects/workflow` | 返回配置、配置修订、已安装事件源与事件默认值 |
-| `PUT /orchestrator/api/projects/workflow` | 提交 `{"revision":0,"config":{}}`，整份替换配置。未填写部分恢复默认值 |
-| `GET /orchestrator/api/projects/:id/checks` | 当前任务检查预约、原因、时间及到期标识 |
-| `GET /orchestrator/api/projects/:id/agent-runs` | 用户消息与系统事实唤起的 Agent 记录、工具调用及实际结果 |
-| `GET /orchestrator/api/projects/events` | 最近 50 条事件，支持 `projectId` 过滤和 `limit`，最多 200 条 |
+`config` 对应文件内的 `sources.github`。该接口只替换 GitHub 的配置，其他来源及全局配置保留；使用读取到的修订号，并发过期返回 409。整份配置仍可通过 `PUT /orchestrator/api/projects/workflow` 提交 `{"revision":1,"config":{...}}` 替换。
 
-保存时使用读取到的 `revision`，并发覆盖返回 409。未知来源、类别、事件和配置字段返回错误。更换适配器时，产生同一事件定义的来源可以继续使用相同的 `on` 配置。事件仅由已注册来源通过绑定的发布入口写入，网页管理接口提供配置与查询。
+解析规则按字段合并：**注册默认值 → 全局 `on` → 当前 `sources.<source>.on`**。仅修改描述会继承既有开关和指导。来源整体关闭、`watch` 未选中的类别仍然不能执行。历史布尔开关和字符串指导继续可读可写，不需要清库或重放事件。
 
-## 开发接入
+内部审计、动作回执与协调事件保留在队列中，不提供用户关闭开关。停用的新业务事件仍留时间线并标记 ignored；已处理记录不重放。
 
-来源通过 `SourceKind.projectEvents` 声明事件的类别、数据校验、默认反应和文档路径。来源运行时用 `SourceContext.projectEvents.publish()` 发布，发布身份绑定来源。服务端用 `ProjectEvents.handle()` 注册同步处理器。处理器在一个事务内写入状态和待执行动作，异步 API 或模型调用必须入 `Effects`。
+## 扩展自己的来源和事件
 
-原生事件 ID 在来源内唯一。同 ID 同内容返回原记录，同 ID 不同内容返回冲突。不同来源可使用相同原生 ID。处理失败回滚状态和该次入队的动作，后续事件等待同一项重试。启动恢复检查 SQLite 的待处理记录，也能恢复提交后丢失的进程内唤醒。
+适配器用 `SourceKind.projectEvents` 注册类型；框架在 `SourceRegistry` 注册时自动安装事件目录。下面是未来 GitLab 适配器中可声明的一种类型，类型名和类别由适配器维护：
 
-事件数据版本由适配器声明，默认是 1，发布时和事件一起存入数据库。配置 JSON 使用业务选项。缺少匹配版本的处理器时保留待处理记录并通过队列健康状态报告原因。
+```ts
+const mergeRequestUpdated: ProjectEventDefinition = {
+  type: 'merge_request.updated',
+  category: 'merge_requests',
+  description: '核对 GitLab 合并请求的真实代码交付事实。',
+  schema: MergeRequestPayload,
+  defaults: { enabled: true },
+  documentation: 'docs/gitlab-events.md',
+}
+// SourceKind: { kind: 'gitlab', ..., projectEvents: [mergeRequestUpdated] }
+```
 
-自主跟进须项目 active 且 autoAdvance=true。项目扫描直接派发已由事实唤起 Agent 的反应替代，设计见[自主跟进](autonomous-follow-up.zh-CN.md)。验收后的 Issue 同步与[看板推进记录和存量兼容](project-history.zh-CN.md)均已接入。每阶段完成后在 [验收记录](acceptance.zh-CN.md) 中登记结果。
+注册后自动生成以下模板，可独立保存为 `gitlab.defaults.json`：
+
+```json
+{
+  "sources": {
+    "gitlab": {
+      "on": {
+        "merge_request.updated": {
+          "enabled": true,
+          "description": "核对 GitLab 合并请求的真实代码交付事实。"
+        }
+      }
+    }
+  }
+}
+```
+
+适配器负责真实 API/回调认证、数据归一化及发布；处理器通过 `ProjectEvents.handle()` 注册。JSON 配置已经安装的能力，安装新的适配器才会获得新的事件源。可导入同一个通用事件契约，也可声明自己的类型；名称相同的通用契约必须复用同一份定义，避免两个插件赋予不同语义。
+
+来源运行时通过绑定的 `SourceContext.projectEvents.publish()` 发布事件。原生 ID 在来源内唯一；同内容重试复用原记录，不同内容返回冲突。事件有数据版本，队列按全局 seq 消费。同步处理器在一个事务内写状态与后续动作，异步 API 或模型调用使用已有 Effects。失败回滚并保留原事件供重试，重启恢复不需要 Agent 持续扫描。
+
+查询和验收入口：
+
+- `GET /orchestrator/api/projects/events`：事件事实与处理状态。
+- `GET /orchestrator/api/projects/:id/history`：[推进记录与通知回执](project-history.zh-CN.md)。
+- `GET /orchestrator/api/projects/:id/checks`：检查预约与到期状态。
+- `GET /orchestrator/api/projects/:id/agent-runs`：实际 Agent 决定与工具结果。
+- [阶段验收记录](acceptance.zh-CN.md)、[2048 人工验收清单](../2048-manual-acceptance.zh-CN.md)。

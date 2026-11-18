@@ -161,7 +161,7 @@ M3/M4 可以跳过，跳过不影响主链路。新建 Issue 默认为本任务�
 - [ ] **不发送“开始 B”或“更新计划”**，B 自动登记且只登记一次工单，显示排队或进行中。
 - [ ] B 的执行信息指向该项目仓库；带入 A 的规则报告，不能只得到一个无背景的任务标题。
 - [ ] 在服务 ready、Worker 有空位时，等待约 10 秒观察派发登记；若仍无工单且无原因说明，记录失败。模型真正开始和完成另行计时。
-- [ ] 若工单受阻或待回答，检查 `task.blocked` 事件及项目群提醒，包含具体原因、问题和真实 @；待回答不等于已经交付。新事件支持的去重与恢复见[阻塞通知说明](events/task-blocked.zh-CN.md)。
+- [ ] 若工单受阻或待回答，检查 `task.blocked` 事件及项目群提醒，包含具体原因、问题和真实 @；待回答不等于已经交付。新事件支持的去重与恢复见[阻塞通知说明](events/follow-up.zh-CN.md)。
 - [ ] 服务正常刷新或按原配置重启后，不重复派发 B。重启验证建议选 B 已待验收时，避免打断代码执行。
 
 这一步验证的是现有 autoAdvance 能力。关闭自动推进的对照试验应看到：A 通过后 B 仍待办，明确要求执行 B 才派发。
@@ -299,4 +299,4 @@ curl -sS -H 'X-Orchestrator-Request: 1' \
 
 **真实群验收记录方式：**记录群消息时间/ID、项目事件 seq、Agent run ID、预约与到期 ID、Outbox 回执及看板变化。自动测试模拟网络、真实只读 GitHub 核验和真实群验收分别记载。未经成员实际交付和验收，不为凑通过率关闭真实业务 Issue。
 
-配置见 [PR 交付事件](events/code-change-observed.zh-CN.md)、[Issue 事实事件](events/issue-observed.zh-CN.md)、[验收后关闭 Issue](events/issue-close-requested.zh-CN.md)和[推进记录与存量迁移](events/project-history.zh-CN.md)。
+配置见 [PR 交付事件](events/repository.zh-CN.md)、[Issue 事实事件](events/repository.zh-CN.md)、[验收后关闭 Issue](events/repository.zh-CN.md)和[推进记录与存量迁移](events/project-history.zh-CN.md)。

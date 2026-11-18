@@ -159,6 +159,6 @@ it('reloads the saved conversation preference after a full runtime restart witho
   expect(new Projects(resumed.runtime.store).list()).toEqual([])
 })
 it('ships the default event JSON and its explanation', () => {
-  expect(JSON.parse(readFileSync(new URL('../config/events/conversation-preferences.defaults.json', import.meta.url), 'utf8'))).toEqual({ on: { [preferenceRequested.type]: true } })
+  expect(JSON.parse(readFileSync(new URL('../config/events/communication.defaults.json', import.meta.url), 'utf8'))).toMatchObject({ sources: { communication: { on: { [preferenceRequested.type]: { enabled: true, description: preferenceRequested.description } } } } })
   expect(readFileSync(new URL(`../${preferenceRequested.documentation}`, import.meta.url), 'utf8')).toContain(preferenceRequested.type)
 })

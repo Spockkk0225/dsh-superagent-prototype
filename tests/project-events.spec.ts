@@ -116,6 +116,56 @@ it('validates JSON overrides, preserves defaults, rejects stale saves and can di
   expect(events.list()).toHaveLength(2)
 })
 
+it('discovers independently configured providers and custom event types from registration', async () => {
+  const custom: ProjectEventDefinition = { type: 'merge_request.updated', category: 'merge_requests', description: '核对 GitLab 合并请求的真实交付。',
+    schema: z.strictObject({ text: z.string() }), defaults: { enabled: true }, documentation: 'gitlab/README.md' }
+  events.register('github', [definition])
+  events.register('gitlab', [definition, custom])
+  const catalog = events.view()
+  expect(catalog.sources.find(source => source.source === 'gitlab')).toMatchObject({ categories: ['samples', 'merge_requests'],
+    defaults: { sources: { gitlab: { on: { 'merge_request.updated': { enabled: true, description: custom.description } } } } } })
+  events.save(0, { sources: { github: { on: { [definition.type]: { enabled: false, description: '只关闭 GitHub' } } },
+    gitlab: { on: { [definition.type]: { enabled: true, description: '' } } } } })
+  const seen: string[] = []
+  events.handle(definition.type, event => { seen.push(event.source); return applied })
+  events.publisher('github').publish(input('github-event'))
+  events.publisher('gitlab').publish(input('gitlab-event'))
+  effects.start(); await effects.idle()
+  expect(seen).toEqual(['gitlab'])
+  expect(events.view().sources.find(source => source.source === 'gitlab')?.events[0]?.effective.description).toBe('')
+})
+
+it('merges source overrides by field and preserves unrelated sources with version checks', () => {
+  events.register('other', [definition])
+  events.save(0, { on: { [definition.type]: false }, sources: { other: { on: { [definition.type]: true } } } })
+  events.saveSource('sample', 1, { on: { [definition.type]: { description: '仅解释，不授权执行' } } })
+  expect(events.settings('sample', definition.type)).toMatchObject({ enabled: false, description: '仅解释，不授权执行' })
+  expect(events.settings('other', definition.type).enabled).toBe(true)
+  expect(() => events.saveSource('sample', 1, {})).toThrow('changed')
+  expect(() => events.saveSource('uninstalled', 2, {})).toThrow('not installed')
+  expect(() => events.saveSource('sample', 2, { on: { 'another.event': true } })).toThrow('not installed')
+  expect(() => events.saveSource('sample', 2, { on: { [definition.type]: { instruction: '不能给后台处理器添加 Agent 指令' } } })).toThrow('no Agent instruction')
+  expect(() => events.saveSource('sample', 2, { on: { [definition.type]: { enabld: true } } })).toThrow()
+  events.saveSource('sample', 2, { enabled: false, on: { [definition.type]: true } })
+  expect(events.settings('sample', definition.type).enabled).toBe(false)
+})
+
+it('recovers object settings, empty descriptions and legacy shorthands across database reopening', async () => {
+  events.save(0, { on: { [definition.type]: false }, sources: { sample: { on: { [definition.type]: { enabled: true, description: '' } } } } })
+  await effects.drain(); store.close(); open()
+  expect(events.settings('sample', definition.type)).toMatchObject({ enabled: true, description: '' })
+  expect(events.view()).toMatchObject({ revision: 1, config: { on: { [definition.type]: false } } })
+})
+
+it('keeps descriptions separate from AI instructions while retaining legacy instruction strings', () => {
+  const agent: ProjectEventDefinition = { ...definition, type: 'agent.requested', defaults: { enabled: true, instruction: '默认指导' } }
+  events.register('agent', [agent])
+  events.save(0, { on: { [agent.type]: '旧格式指导' }, sources: { agent: { on: { [agent.type]: { description: '显示说明' } } } } })
+  expect(events.settings('agent', agent.type)).toMatchObject({ enabled: true, description: '显示说明', instruction: '旧格式指导' })
+  events.saveSource('agent', 1, { on: { [agent.type]: { enabled: false, description: '', instruction: '新的指导' } } })
+  expect(events.settings('agent', agent.type)).toMatchObject({ enabled: false, description: '', instruction: '新的指导' })
+})
+
 it('binds publishers to registered source schemas and supports the same event from another adapter', async () => {
   events.register('another', [definition])
   const run = vi.fn(() => applied)

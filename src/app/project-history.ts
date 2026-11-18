@@ -56,11 +56,15 @@ export class ProjectHistory {
     const events = this.events.list({ projectId, limit: 100, before })
     const runs = this.store.keys(KV.projects.agentRun).map(entry => this.store.get(entry)!)
       .filter(run => run.message.projectId === projectId)
+    const descriptions = new Map(this.events.view().sources.flatMap(source => source.events
+      .map(event => [`${source.source}:${event.type}`, event.effective.description] as const)))
     const entries = events.map(event => {
-      const linked = runs.filter(run => run.event?.id === event.id || run.message.messageId === event.id || run.message.messageId === (event.data as { messageId?: string }).messageId ||
-        (event.data as { runId?: string }).runId === run.id || run.event?.id === event.causeId)
       const data = event.data as Record<string, unknown>
-      const label = this.events.view().events.find(definition => definition.type === event.type)?.description
+      const linked = runs.filter(run => run.event?.id === event.id || run.message.messageId === event.id ||
+        (typeof data.messageId === 'string' && run.message.messageId === data.messageId) ||
+        (typeof data.runId === 'string' && data.runId === run.id) ||
+        (!!event.causeId && (run.event?.id === event.causeId || run.id === event.causeId)))
+      const label = descriptions.get(`${event.source}:${event.type}`)
       return { event, label: label ?? (event.type === changed.type ? '项目变更已提交' : event.type === imported.type ? '存量基线已导入' : event.type),
         reason: event.reason || (typeof data.reason === 'string' ? data.reason : typeof data.text === 'string' ? data.text : undefined),
         decisions: linked.map((run: ProjectAgentRun) => ({ id: run.id, status: run.status, reply: run.reply, trigger: run.event?.type ?? 'project.message.received',

@@ -1,0 +1,12 @@
+{
+  "sources": {
+    "communication": {
+      "on": {
+        "conversation.preferences.update_requested": {
+          "enabled": true,
+          "description": "按成员的明确请求更新当前会话的沟通偏好，独立于项目长期保存。"
+        }
+      }
+    }
+  }
+}

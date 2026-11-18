@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -66,6 +66,28 @@ it('registers an event source and serves versioned workflow JSON and event histo
   expect(history).toMatchObject({ status: 200, body: [{ id: 'normal-entry', source: 'sample', status: 'applied' }] })
   expect(h.relays(h.runtime.masterId)).toHaveLength(before)
   expect(await h.api('GET', 'projects/events?limit=201')).toMatchObject({ status: 400 })
+})
+
+it('exports one described configuration per registered source and saves a source without replacing others', async () => {
+  const h = host = await startRuntime(undefined, undefined, undefined, undefined, undefined, { name: 'Config Agent', propose: async () => ({ calls: [], reply: '' }) })
+  h.runtime.sources.register(dingTalkKind(async () => {}))
+  const catalog = h.runtime.projectEvents.view()
+  const configured = catalog.sources.filter(source => source.events.length)
+  expect(readdirSync('config/events').sort()).toEqual(configured.map(source => `${source.source}.defaults.json`).sort())
+  for (const source of configured) {
+    expect(JSON.parse(readFileSync(`config/events/${source.source}.defaults.json`, 'utf8'))).toEqual(source.defaults)
+    expect(source.events.every(event => !!event.effective.description)).toBe(true)
+    for (const event of source.events) expect(readFileSync(event.documentation, 'utf8')).toContain(event.type)
+  }
+  expect(await h.api('PUT', 'projects/workflow', { revision: 0, config: catalog.defaults })).toMatchObject({ status: 200 })
+  expect(await h.api('PUT', 'projects/workflow/sources/github', { revision: 1,
+    config: { on: { 'issue.observed': { enabled: false, description: '' } } } })).toMatchObject({ status: 200, body: { revision: 2,
+      config: { sources: { github: { on: { 'issue.observed': { enabled: false, description: '' } } },
+        dingtalk: catalog.defaults.sources.dingtalk } } } })
+  expect(h.runtime.projectEvents.settings('repository', 'issue.observed').enabled).toBe(true)
+  expect(h.runtime.projectEvents.settings('github', 'issue.observed').enabled).toBe(false)
+  expect(await h.api('PUT', 'projects/workflow/sources/github', { revision: 1, config: {} })).toMatchObject({ status: 409 })
+  expect(await h.api('PUT', 'projects/workflow/sources/gitlab', { revision: 2, config: {} })).toMatchObject({ status: 400 })
 })
 
 it('creates a task Issue idempotently and reconciles an uncertain GitHub response', async () => {

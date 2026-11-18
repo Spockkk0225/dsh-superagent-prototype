@@ -12,13 +12,18 @@ const name = z.string().regex(/^[a-z][a-z0-9_.-]{0,127}$/)
 const id = z.string().min(1).max(300)
 const Input = z.strictObject({ id, type: name, projectId: id.optional(), taskId: id.optional(), causeId: id.optional(),
   occurredAt: z.iso.datetime().optional(), data: z.unknown() })
+const EventOptions = z.strictObject({ enabled: z.boolean().optional(), description: z.string().max(2000).optional(),
+  instruction: z.string().trim().min(1).max(8000).optional() })
+const EventSetting = z.union([z.boolean(), z.string().trim().min(1).max(8000), EventOptions])
+const Reactions = z.record(name, EventSetting)
+export const SourceWorkflowConfig = z.strictObject({ enabled: z.boolean().optional(), watch: z.array(name).max(100).optional(), on: Reactions.optional() })
 export const ProjectWorkflowConfig = z.strictObject({
-  sources: z.record(name, z.strictObject({ enabled: z.boolean().optional(), watch: z.array(name).max(100).optional() })).default({}),
-  on: z.record(name, z.union([z.boolean(), z.string().trim().min(1).max(8000)])).default({}),
+  sources: z.record(name, SourceWorkflowConfig).default({}),
+  on: Reactions.default({}),
 })
 export type ProjectWorkflowConfig = z.output<typeof ProjectWorkflowConfig>
 export type ProjectWorkflowVersion = { revision: number; config: ProjectWorkflowConfig }
-type Reaction = { enabled: boolean; instruction?: string }
+type Reaction = { enabled: boolean; instruction?: string; description?: string }
 type Result = { status: 'applied' | 'ignored'; reason?: string }
 type Handler = (event: ProjectEvent, reaction: Reaction) => Result
 
@@ -69,15 +74,31 @@ export class ProjectEvents {
 
   view() {
     const saved = this.store.get(KV.projects.workflow) ?? { revision: 0, config: ProjectWorkflowConfig.parse({}) }
+    const definitions = this.definitions().filter(item => !item.internal)
+    const sources = [...this.sources].map(([source, definitions]) => ({ source, config: saved.config.sources[source] ?? {},
+      categories: [...new Set(definitions.filter(item => !item.internal).map(item => item.category))],
+      defaults: { sources: { [source]: { on: Object.fromEntries(definitions.filter(item => !item.internal)
+        .map(item => [item.type, { enabled: item.defaults.enabled, description: item.description }])) } } },
+      events: definitions.filter(item => !item.internal).map(item => ({ type: item.type, documentation: item.documentation,
+        effective: this.settings(source, item.type) })),
+    })).filter(source => !this.sources.get(source.source)?.length || this.sources.get(source.source)!.some(item => !item.internal))
     return { ...saved,
-      sources: [...this.sources].map(([source, definitions]) => ({ source,
-        categories: [...new Set(definitions.filter(item => !item.internal).map(item => item.category))] }))
-        .filter(source => !this.sources.get(source.source)?.length || this.sources.get(source.source)!.some(item => !item.internal)),
-      events: this.definitions().filter(item => !item.internal).map(definition => {
+      sources,
+      defaults: { sources: Object.fromEntries(sources.filter(source => source.events.length)
+        .map(source => [source.source, source.defaults.sources[source.source]!])), on: {} },
+      events: definitions.map(definition => {
         const { schema: _schema, ...metadata } = definition
         return { ...metadata, version: definition.version ?? 1, effective: this.reaction(definition, saved.config) }
       }),
     }
+  }
+
+  /** Updates a registered source without replacing any other source or legacy global overrides. */
+  saveSource(source: string, revision: number, input: unknown): ReturnType<ProjectEvents['view']> {
+    if (!this.sources.has(source)) throw new ProjectError(400, `Project event source is not installed: ${source}`)
+    const value = SourceWorkflowConfig.parse(input)
+    const saved = this.view().config
+    return this.save(revision, { ...saved, sources: { ...saved.sources, [source]: value } })
   }
 
   save(revision: number, input: unknown): ReturnType<ProjectEvents['view']> {
@@ -89,14 +110,9 @@ export class ProjectEvents {
       const categories = new Set(definitions.map(item => item.category))
       if (value.watch?.some(category => !categories.has(category)))
         throw new ProjectError(400, `Unknown watch category for ${source}`)
+      for (const [type, setting] of Object.entries(value.on ?? {})) this.validateReaction(type, setting, definitions)
     }
-    for (const [type, value] of Object.entries(config.on)) {
-      const definition = this.definitions().find(item => item.type === type)
-      if (!definition) throw new ProjectError(400, `Project event is not installed: ${type}`)
-      if (definition.internal) throw new ProjectError(400, 'Internal events have no user configuration')
-      if (typeof value === 'string' && definition.defaults.instruction === undefined)
-        throw new ProjectError(400, `This event uses a background handler and has no Agent instruction: ${type}`)
-    }
+    for (const [type, value] of Object.entries(config.on)) this.validateReaction(type, value, this.definitions())
     return this.store.atomic(() => {
       if (this.view().revision !== revision) throw new ProjectError(409, 'Project workflow configuration changed. Reload before saving.')
       this.store.set(KV.projects.workflow, { revision: revision + 1, config })
@@ -105,10 +121,18 @@ export class ProjectEvents {
     })
   }
 
-  private reaction(definition: ProjectEventDefinition, config: ProjectWorkflowConfig): Reaction {
-    const value = config.on[definition.type]
-    return { enabled: typeof value === 'string' ? true : value ?? definition.defaults.enabled,
-      instruction: typeof value === 'string' ? value : definition.defaults.instruction }
+  private validateReaction(type: string, value: z.output<typeof EventSetting>, definitions: readonly ProjectEventDefinition[]): void {
+    const definition = definitions.find(item => item.type === type)
+    if (!definition) throw new ProjectError(400, `Project event is not installed for this source: ${type}`)
+    if (definition.internal) throw new ProjectError(400, 'Internal events have no user configuration')
+    if ((typeof value === 'string' || typeof value === 'object' && value.instruction !== undefined) && definition.defaults.instruction === undefined)
+      throw new ProjectError(400, `This event uses a background handler and has no Agent instruction: ${type}`)
+  }
+
+  private reaction(definition: ProjectEventDefinition, config: ProjectWorkflowConfig, sourceValue?: z.output<typeof EventSetting>): Reaction {
+    const normalize = (value?: z.output<typeof EventSetting>) => typeof value === 'boolean' ? { enabled: value }
+      : typeof value === 'string' ? { enabled: true, instruction: value } : value ?? {}
+    return { ...definition.defaults, description: definition.description, ...normalize(config.on[definition.type]), ...normalize(sourceValue) }
   }
 
   settings(source: string, type: string): Reaction {
@@ -117,7 +141,7 @@ export class ProjectEvents {
     if (definition.internal) return definition.defaults
     const config = this.store.get(KV.projects.workflow)?.config ?? ProjectWorkflowConfig.parse({})
     const sourceConfig = config.sources[source]
-    const reaction = this.reaction(definition, config)
+    const reaction = this.reaction(definition, config, sourceConfig?.on?.[type])
     return { ...reaction, enabled: reaction.enabled && sourceConfig?.enabled !== false &&
       (!sourceConfig?.watch || sourceConfig.watch.includes(definition.category)) }
   }

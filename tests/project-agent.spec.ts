@@ -285,7 +285,7 @@ it('rejects membership spoofing, cross-project tools and stale group membership'
 })
 
 it('ships a matching default JSON for the message event and its configuration documentation', () => {
-  const defaults = JSON.parse(readFileSync(new URL('../config/events/project-message.defaults.json', import.meta.url), 'utf8'))
-  expect(defaults).toEqual({ on: { 'project.message.received': projectMessageReceived.defaults.instruction } })
+  const defaults = JSON.parse(readFileSync(new URL('../config/events/dingtalk.defaults.json', import.meta.url), 'utf8'))
+  expect(defaults.sources.dingtalk.on['project.message.received']).toEqual({ enabled: true, description: projectMessageReceived.description })
   expect(readFileSync(new URL(`../${projectMessageReceived.documentation}`, import.meta.url), 'utf8')).toContain('project.message.received')
 })

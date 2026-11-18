@@ -50,7 +50,7 @@ flowchart TD
 }
 ```
 
-此配置与其他事件选项合并后，通过 workflow API 及当前 revision 保存。独立默认 JSON 与配置说明分别为[任务就绪](task-ready.zh-CN.md)、[阻塞跟进](task-blocked.zh-CN.md)、[预约检查](check-due.zh-CN.md)。项目仍须 active 且 autoAdvance=true。关闭自动推进不会阻止已授权的直接人工操作，也不会撤销正在执行的 Worker；只停止新的自主跟进行动。
+此配置与其他事件选项合并后，通过 workflow API 及当前 revision 保存。默认 JSON 按注册来源分别为 [project](../../config/events/project.defaults.json)、[execution](../../config/events/execution.defaults.json)、[clock](../../config/events/clock.defaults.json)，行为参考归在[自主跟进事件](follow-up.zh-CN.md)。项目仍须 active 且 autoAdvance=true。关闭自动推进不会阻止已授权的直接人工操作，也不会撤销正在执行的 Worker；只停止新的自主跟进行动。
 
 ## 顺序、去重和失效
 

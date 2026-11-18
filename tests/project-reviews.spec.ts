@@ -220,10 +220,10 @@ it('recovers legacy pending review state silently without migrating completed hi
   expect(projects.detail(id).tasks.find(item => item.id !== task.id)?.reviews).toBeUndefined()
   expect(send).not.toHaveBeenCalled()
 })
-it('ships per-event defaults and configuration documents', () => {
+it('ships review source defaults with descriptions and a shared configuration guide', () => {
   for (const event of [reviewRequested, reviewAccepted, reviewRejected]) {
-    const config = JSON.parse(readFileSync(new URL(`../config/events/${event.type.replace('.', '-')}.defaults.json`, import.meta.url), 'utf8'))
-    expect(config).toEqual({ on: { [event.type]: true } })
+    const config = JSON.parse(readFileSync(new URL('../config/events/review.defaults.json', import.meta.url), 'utf8'))
+    expect(config.sources.review.on[event.type]).toEqual({ enabled: true, description: event.description })
     expect(readFileSync(new URL(`../${event.documentation}`, import.meta.url), 'utf8')).toContain(event.type)
   }
 })

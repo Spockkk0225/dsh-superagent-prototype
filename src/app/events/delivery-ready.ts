@@ -11,7 +11,7 @@ import { mergedDelivery } from '../repository-delivery.ts'
 const Payload = z.strictObject({ ticketId: z.string().min(1), reportAt: z.iso.datetime() })
 export const deliveryReady: ProjectEventDefinition = {
   type: 'delivery.ready', category: 'deliveries', description: '当前执行已成功交付，将任务移到待验收并通知验收人。',
-  schema: Payload, defaults: { enabled: true }, documentation: 'docs/events/delivery-ready.zh-CN.md',
+  schema: Payload, defaults: { enabled: true }, documentation: 'docs/events/delivery.zh-CN.md',
 }
 interface Host { store: Store; events: ProjectEvents; reviews: ProjectReviews; notify(message: OutboundMessage): void }
 

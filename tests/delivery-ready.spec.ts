@@ -96,7 +96,7 @@ it('backfills a legacy completed ticket at recovery and reuses its previous noti
 })
 
 it('ships the delivery event with matching default JSON and configuration documentation', () => {
-  const config = JSON.parse(readFileSync(new URL('../config/events/delivery-ready.defaults.json', import.meta.url), 'utf8'))
-  expect(config).toEqual({ on: { 'delivery.ready': deliveryReady.defaults.enabled } })
+  const config = JSON.parse(readFileSync(new URL('../config/events/execution.defaults.json', import.meta.url), 'utf8'))
+  expect(config.sources.execution.on['delivery.ready']).toEqual({ enabled: deliveryReady.defaults.enabled, description: deliveryReady.description })
   expect(existsSync(new URL(`../${deliveryReady.documentation}`, import.meta.url))).toBe(true)
 })

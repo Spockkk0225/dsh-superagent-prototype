@@ -18,7 +18,7 @@ const Channel = z.strictObject({ source: id, thread: id, address: z.record(z.str
 const Request = z.strictObject({ projectId: id, actorId: id.nullable(), channel: Channel, target: Channel,
   operationId: id, revision: z.number().int().nonnegative(), value: CommunicationPreference })
 export const preferenceRequested: ProjectEventDefinition = { type: 'conversation.preferences.update_requested', category: 'preferences', schema: Request,
-  description: '按成员的明确请求更新当前会话的沟通偏好，独立于项目长期保存。', defaults: { enabled: true }, documentation: 'docs/events/conversation-preferences.zh-CN.md' }
+  description: '按成员的明确请求更新当前会话的沟通偏好，独立于项目长期保存。', defaults: { enabled: true }, documentation: 'docs/events/communication.zh-CN.md' }
 const Summary = z.strictObject({ summary: z.string().trim().min(1).max(360) })
 const { $schema: _dialect, ...summarySchema } = z.toJSONSchema(Summary)
 const scopeKey = (channel: Pick<ChannelRef, 'source' | 'thread'>) => key(channel.source, channel.thread)

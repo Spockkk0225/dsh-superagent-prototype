@@ -16,11 +16,11 @@ import type { DeliveryReady } from './events/delivery-ready.ts'
 const Close = z.strictObject({ reviewId: z.string(), url: z.url(), repository: z.string(), version: z.number().int().nonnegative() })
 export const issueCloseRequested: ProjectEventDefinition = { type: 'issue.close.requested', category: 'issues', schema: Close,
   description: '人工验收通过后，关闭本任务明确负责解决的 Issue。历史关联默认仅参考。', defaults: { enabled: true },
-  documentation: 'docs/events/issue-close-requested.zh-CN.md' }
+  documentation: 'docs/events/repository.zh-CN.md' }
 const SyncResult = z.strictObject({ operationId: z.string(), attempt: z.number().int().positive(), status: z.enum(['succeeded', 'retrying', 'failed', 'cancelled']),
   reason: z.string(), remote: RepositoryFact.optional() })
 const syncResult: ProjectEventDefinition = { type: 'issue.sync.result', category: 'issues', schema: SyncResult, internal: true,
-  description: '保存实际同步回执或失败原因。', defaults: { enabled: true }, documentation: 'docs/events/issue-close-requested.zh-CN.md' }
+  description: '保存实际同步回执或失败原因。', defaults: { enabled: true }, documentation: 'docs/events/repository.zh-CN.md' }
 export interface IssueSync { id: string; projectId: string; taskId: string; reviewId: string; url: string; repository: string; version: number;
   status: 'pending' | 'succeeded' | 'retrying' | 'failed' | 'cancelled'; attempts: number; reason: string; updatedAt: string }
 interface Host { store: Store; events: ProjectEvents; effects: Effects; commands: Pick<Commands, 'forRepository'>; delivery: Pick<DeliveryReady, 'observe'>; runnable?(): boolean }

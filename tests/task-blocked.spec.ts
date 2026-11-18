@@ -190,7 +190,7 @@ it('preserves its stable receipt and active problem across a full runtime restar
   expect(resumed.runtime.effects.pending('reply', noticeId)).toBe(false)
 })
 it('ships the event default and configuration documentation', () => {
-  const config = JSON.parse(readFileSync(new URL('../config/events/task-blocked.defaults.json', import.meta.url), 'utf8'))
-  expect(config).toEqual({ on: { 'task.blocked': taskBlocked.defaults.enabled } })
+  const config = JSON.parse(readFileSync(new URL('../config/events/execution.defaults.json', import.meta.url), 'utf8'))
+  expect(config.sources.execution.on['task.blocked']).toEqual({ enabled: taskBlocked.defaults.enabled, description: taskBlocked.description })
   expect(readFileSync(new URL(`../${taskBlocked.documentation}`, import.meta.url), 'utf8')).toContain('task.blocked')
 })

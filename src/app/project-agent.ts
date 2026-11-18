@@ -19,7 +19,7 @@ const Proposed = z.strictObject({ runId: z.string(), turn: z.number().int().nonn
   decision: Decision, provider: z.string(), failure: z.string().optional() })
 const proposed: ProjectEventDefinition = { type: 'project.agent.proposed', category: 'agent', schema: Proposed,
   description: '按当前项目版本提交一次 Agent 工具调用或答复。', defaults: { enabled: true }, internal: true,
-  documentation: 'docs/events/project-message.zh-CN.md' }
+  documentation: 'docs/events/communication.zh-CN.md' }
 type Step = { provider: string; revision: number; calls: z.output<typeof Call>[]; results: ProjectToolResult[]; error?: string }
 export interface ProjectAgentRun {
   id: string

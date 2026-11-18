@@ -268,10 +268,10 @@ it('removes pending checks when the project aggregate is deleted', async () => {
   expect(react).not.toHaveBeenCalled()
 })
 
-it('ships a separate default JSON and configuration guide for each follow-up event', () => {
+it('ships the registered source defaults and shared guide for follow-up events', () => {
   for (const definition of [taskReady, checkDue]) {
-    const file = definition.type === taskReady.type ? 'task-ready' : 'check-due'
-    expect(JSON.parse(readFileSync(`config/events/${file}.defaults.json`, 'utf8'))).toEqual({ on: { [definition.type]: true } })
+    const file = definition.type === taskReady.type ? 'project' : 'clock'
+    expect(JSON.parse(readFileSync(`config/events/${file}.defaults.json`, 'utf8')).sources[file].on[definition.type]).toEqual({ enabled: true, description: definition.description })
     expect(readFileSync(definition.documentation, 'utf8')).toContain(definition.type)
   }
 })

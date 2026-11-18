@@ -47,7 +47,7 @@ export interface HttpHost {
   readonly projectHistory?: Pick<ProjectHistory, 'view'>
   readonly projectRepository?: Pick<ProjectRepositorySync, 'retry'>
   readonly projectProgress?: Pick<ProjectProgress, 'checks'>
-  readonly projectEvents?: Pick<ProjectEvents, 'view' | 'save' | 'list'>
+  readonly projectEvents?: Pick<ProjectEvents, 'view' | 'save' | 'saveSource' | 'list'>
   readonly projectAgent?: Pick<ProjectAgent, 'submit' | 'runs'>
   readonly projectTools?: Pick<ProjectTools, 'catalog' | 'snapshot'>
   readonly projectReviews?: Pick<ProjectReviews, 'submit' | 'decide'>
@@ -258,6 +258,10 @@ function projectRoutes(store: Store, host?: Pick<HttpHost, 'projectExecution' | 
     'PUT projects/workflow': async ({ body }) => {
       const update = z.strictObject({ revision: z.number().int().nonnegative(), config: z.unknown() }).parse(await body())
       return events().save(update.revision, update.config)
+    },
+    'PUT projects/workflow/sources/:source': async ({ params, body }) => {
+      const update = z.strictObject({ revision: z.number().int().nonnegative(), config: z.unknown() }).parse(await body())
+      return events().saveSource(params.source, update.revision, update.config)
     },
     'GET projects/events': ({ query }) => events().list(z.strictObject({ projectId: ticketId.optional(),
       limit: z.coerce.number().int().min(1).max(200).optional() }).parse(query)),

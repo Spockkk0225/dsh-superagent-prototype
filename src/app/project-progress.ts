@@ -16,14 +16,14 @@ export const taskReady: ProjectEventDefinition = {
   type: 'task.ready', category: 'dependencies', schema: Ready,
   description: '项目授权推进且任务依赖已验收，唤起 Agent 判断下一步。',
   defaults: { enabled: true, instruction: '任务现在满足推进条件。结合最新目标、分工和依赖判断下一步；Agent 任务条件具备时通过 task.start 登记一次执行，人工任务提醒负责人开始。条件不足时明确缺项，必要时预约检查。不得自行验收或虚构完成。' },
-  documentation: 'docs/events/task-ready.zh-CN.md',
+  documentation: 'docs/events/follow-up.zh-CN.md',
 }
 const Due = z.strictObject({ checkId: id, signature: id, reason: z.string().min(1).max(2000) })
 export const checkDue: ProjectEventDefinition = {
   type: 'check.due', category: 'checks', schema: Due,
   description: '一次已保存的检查时间到达，唤起 Agent 核对当前任务。',
   defaults: { enabled: true, instruction: '已到预约检查时间。先读取最新工单、交付和阻塞事实，判断是否需要向原工单补充上下文、提醒负责人或安排下一次检查。没有变化且无需行动时保持安静。不要重复启动工单，不要重复催促同一问题；只能根据真实证据推进。' },
-  documentation: 'docs/events/check-due.zh-CN.md',
+  documentation: 'docs/events/follow-up.zh-CN.md',
 }
 export interface ProjectCheck { id: string; projectId: string; taskId: string; at: string; reason: string; signature: string; fired?: boolean }
 interface Host { store: Store; events: ProjectEvents; agent: Pick<ProjectAgent, 'react'>; lifetime: AbortSignal; now?: () => number }

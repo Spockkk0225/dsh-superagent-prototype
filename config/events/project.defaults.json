@@ -1,0 +1,12 @@
+{
+  "sources": {
+    "project": {
+      "on": {
+        "task.ready": {
+          "enabled": true,
+          "description": "项目授权推进且任务依赖已验收，唤起 Agent 判断下一步。"
+        }
+      }
+    }
+  }
+}

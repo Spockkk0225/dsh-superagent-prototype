@@ -13,7 +13,7 @@ const Payload = z.strictObject({ ticketId: id, assignmentId: id, reportAt: z.iso
   attentionId: id.optional(), noticeId: id, signature: id, deliveryVersion: z.number().int().nonnegative() })
 export const taskBlocked: ProjectEventDefinition = {
   type: 'task.blocked', category: 'blockers', description: '当前工单报告受阻或等待人工回答，向项目群通知具体原因及问题。',
-  schema: Payload, defaults: { enabled: true, instruction: '核对本次阻塞与当前执行能力。能用已知证据解决时向原工单补充信息；需要人工信息或环境处理时明确说明负责人和下一步。不得代替人授权、验收或反复重试不可执行操作；必要时预约一次后续检查。' }, documentation: 'docs/events/task-blocked.zh-CN.md',
+  schema: Payload, defaults: { enabled: true, instruction: '核对本次阻塞与当前执行能力。能用已知证据解决时向原工单补充信息；需要人工信息或环境处理时明确说明负责人和下一步。不得代替人授权、验收或反复重试不可执行操作；必要时预约一次后续检查。' }, documentation: 'docs/events/follow-up.zh-CN.md',
 }
 export interface ProjectBlockage { ticketId: string; assignmentId: string; signature: string; noticeId: string }
 interface Host {

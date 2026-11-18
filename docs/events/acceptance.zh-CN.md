@@ -111,3 +111,20 @@ GitHub 状态事件与推进记录已纳入第 5、6 部分。自主跟进已纳
 第 5、6 部分完整 `pnpm check`：76 个测试文件、1410 项通过，2 项既有跳过；类型检查和构建通过。新增仓库/历史专项 19 项，页面交互覆盖失败恢复与实际消息回执。
 
 部署前备份：`.artifacts/state-backups/before-repository-history-1794976339235.sqlite`。已实际加载 3090 服务并确认原项目 A done、B 原工单 in-progress、C todo，未重置、代验收、增派工单或关闭旧 Issue。运行时、钉钉、GitHub 均 ready；workflow 仍 revision=1，LAN=0。新 `issue.observed` 已 applied，真实 Issue #2 为 open，存量基线仅一份，无远端关闭同步。
+
+
+## 真实 2048 群聊增量验收与配置归拢（2026-11-18）
+
+本轮由 Robin 使用真实账号发送群消息，不重放或模拟入站内容。12:54:21（北京时间）消息进入 project.message.received，seq=38；Agent 调用 project.inspect 和 follow_up.schedule，保存一次 12:56:21 的 B 检查预约。
+
+- 首次答复通过真实 DingTalk Outbox，回执 9a148298298b4d4370d7a52638acb427 为 sent；安全运输投影记录 session-webhook / markdown / markdown，接口于 12:55:08 接受。
+- 到期 check.due 自动入队并 applied，Agent 自主调用 project.inspect；没有新情况，最终 reply 为空、run completed，不重复发送群提醒。
+- A done、B 原工单 in-progress、C todo；项目 revision=19，原工单不变，没有新增派工、代验收或 Issue 写入。
+- 真实查询暴露缺失 causeId 时关联到无关历史 Agent run 的展示错误，已改为仅关联明确事件或 run 标识，并增加多条无因果消息的隔离回归。
+- 本机保存受限的原始证据于 .artifacts/real-2048-check-2026-11-18.json，含内部消息及成员信息，不提交远端。sent 证明接口接受；客户端展示和已读仍由成员观察。
+
+配置已按注册事件源归拢，来源数量与事件类型可扩展，不固定为四类。模板由注册目录生成，每个事件含默认 description（可空）；开关、说明与 Agent 指导分别处理。来源配置覆盖通用默认值，并可通过独立保存接口保留其他来源配置。
+
+新增测试验证独立 GitHub / GitLab 设置、自定义 merge_request.updated 类型的自动模板、描述为空的恢复、字段继承、旧格式兼容、无效来源与指令拒绝、完整模板与注册表一致。完整 pnpm check：76 个测试文件、1416 项通过、2 项既有跳过；类型检查与构建通过。
+
+配置归拢部署前备份：`.artifacts/state-backups/before-repository-history-1794978508150.sqlite`。已加载本机 3090 新版本：workflow revision=1、项目 revision=19，真实入站 seq=38 与到期 seq=41 均各关联一条正确 Agent run；check.due 仍仅一条，首次 Markdown 通知仍仅一条，未重触发。运行时、钉钉、GitHub 均 ready。

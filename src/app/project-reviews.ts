@@ -22,7 +22,7 @@ const Evidence = ReviewEvidence.extend({ ticketId: id.optional(), reportAt: z.is
 const Request = z.strictObject({ context: Context, evidence: Evidence, basis: z.string(), silent: z.boolean().default(false) })
 const Decision = z.strictObject({ context: Context, reviewId: id, reason: z.string().trim().min(1).max(8000) })
 function definition(type: string, description: string, schema: z.ZodType): ProjectEventDefinition {
-  return { type, category: 'reviews', description, schema, defaults: { enabled: true }, documentation: `docs/events/${type.replace('.', '-')}.zh-CN.md` }
+  return { type, category: 'reviews', description, schema, defaults: { enabled: true }, documentation: 'docs/events/delivery.zh-CN.md' }
 }
 export const reviewRequested = definition('review.requested', '记录本版交付和验收条件，并通知任务负责人验收。', Request)
 export const reviewAccepted = definition('review.accepted', '当前负责人通过本版验收，完成任务并保留验收依据。', Decision)

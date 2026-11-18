@@ -22,6 +22,6 @@
 
 审计事件是内部事实，不提供可关闭或改写的 JSON 行为，以免业务记录丢失。现有默认统一配置 `{"sources":{},"on":{}}` 即可使用。GitHub 三种用户事件各自有默认 JSON 和中文说明。
 
-`GET /orchestrator/api/projects/:id/history?before=<seq>` 返回 entries、next、synchronization、remote、checks。每页最多 100 条，next 为下一页游标；同一项目的 agent-runs 与 events 查询接口保持兼容。
+`GET /orchestrator/api/projects/:id/history?before=<seq>` 返回 entries、next、notifications、synchronization、remote、checks。每页最多 100 条，next 为下一页游标；同一项目的 agent-runs 与 events 查询接口保持兼容。
 
 通知从当前事件或 Agent run 显式携带项目因果标识，并展示 Outbox 的实际 pending/sent/dropped 回执；不以群 ID 猜测归属。sent 只表示发送接口接受，不能证明客户端已读。迁移不会根据旧消息补造这些关联。
