@@ -31,7 +31,7 @@ Open the [project workspace](http://127.0.0.1:3082/orchestrator/projects). This 
 
 ## Try the 2048 tutorial
 
-Start with meeting notes from a project chat, run a task, then see how human acceptance unlocks the next one. The walkthrough includes copyable messages and an animated side-by-side view of the chat and project board. [2048 tutorial · 中文](docs/tutorials/2048.zh-CN.md)
+Start with meeting notes from a project chat, run a task, then see how human acceptance unlocks the next one. The walkthrough includes copyable messages, screenshots, and a recording of approval and the resulting changes on the project board. [2048 tutorial · 中文](docs/tutorials/2048.zh-CN.md)
 
 ## Documentation
 

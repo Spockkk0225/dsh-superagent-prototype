@@ -189,12 +189,12 @@ function projectRoutes(store: Store, host?: Pick<HttpHost, 'projectExecution' | 
   'selectRobotPlanner' | 'runProjectTask' | 'followProjectTask' | 'stopProjectTask' | 'projectEvents' | 'projectAgent' | 'projectTools' | 'projectReviews' | 'communication' | 'projectProgress' | 'projectHistory' | 'projectRepository'>): Pick<Routes, ProjectRoute> {
   const projects = new Projects(store)
   const runtime = () => {
-    if (!host) throw new ProjectError(409, 'Start the full Super Agent service to run project tasks')
+    if (!host) throw new ProjectError(409, 'Start the full Super-Org service to run project tasks')
     return host
   }
   const ticketId = z.string().min(1).max(128)
   const events = () => {
-    if (!host?.projectEvents) throw new ProjectError(409, 'Start the full Super Agent service to manage project events')
+    if (!host?.projectEvents) throw new ProjectError(409, 'Start the full Super-Org service to manage project events')
     return host.projectEvents
   }
   const agent = () => {
@@ -395,7 +395,7 @@ function match(table: Partial<Routes>, method: string, segments: string[]) {
 const projectsPage = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Super Agent · 项目</title>
+<title>Super-Org · 项目</title>
 <script src="/orchestrator/projects.js" defer></script></head>
 <body><div id="superagent-projects"></div></body></html>`
 
@@ -422,8 +422,8 @@ function authorizePublicProject(req: IncomingMessage, res: ServerResponse, acces
   }
   const credential = /^Basic ([A-Za-z0-9+/]+={0,2})$/i.exec(req.headers.authorization ?? '')?.[1]
   if (credential && timingSafeEqual(access.credentialHash, hashCredentials(Buffer.from(credential, 'base64')))) return true
-  res.setHeader('WWW-Authenticate', 'Basic realm="Super Agent Projects", charset="UTF-8"')
-  json(res, 401, { error: 'Sign in to Super Agent Projects' })
+  res.setHeader('WWW-Authenticate', 'Basic realm="Super-Org Projects", charset="UTF-8"')
+  json(res, 401, { error: 'Sign in to Super-Org Projects' })
   return false
 }
 

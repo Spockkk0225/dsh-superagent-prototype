@@ -313,7 +313,7 @@ const TEXT = {
   'project.runtime.paused': ['Agent 执行已暂停', 'Agent execution paused'],
   'project.runtime.setup': ['Agent 正在等待部署配置', 'Agent setup required'],
   'project.runtime.source-off': ['本地请求来源未授权', 'Local requests unavailable'],
-  'project.waitingForKickoff': ['项目待开工。仍可在钉钉确认纪要和分工。', 'Project awaiting kickoff. The team can still review the minutes and assignments in DingTalk.'],
+  'project.waitingForKickoff': ['项目待开工。仍可在项目群确认纪要和分工。', 'Project awaiting kickoff. The team can still review the minutes and assignments in the project chat.'],
   'project.noActiveWorkers': ['当前没有 Agent 在执行任务。', 'No agents are currently running tasks.'],
   'project.connection.dingtalk': ['钉钉机器人', 'DingTalk bot'],
   'project.githubAccount': ['GitHub 账号', 'GitHub account'],
