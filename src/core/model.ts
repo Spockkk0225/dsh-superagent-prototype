@@ -108,7 +108,7 @@ export type AcceptMode = 'off' | 'observe' | 'auto'
 /** Where a Mandate's Trigger was received: its Source, its receiving scope as the Source recorded it, and its admission row. */
 interface Received { source?: string; scope?: Record<string, unknown>; row?: string }
 /**
- * How the gate admitted the Trigger a Mandate came from, which `revalidate` re-checks (see `docs/002`):
+ * How the gate admitted the Trigger a Mandate came from, which `revalidate` re-checks (see the upstream DSH authorization design):
  * - `addressed`: a sender on the Source's list addressed the agent;
  * - `followup`: a message on a Thread that has tickets;
  * - `admission`: the cell of the receiving scope's admission row; `observation` when it made an inferred candidate under

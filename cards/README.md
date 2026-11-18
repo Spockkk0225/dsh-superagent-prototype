@@ -1,37 +1,23 @@
-# DingTalk AI receipts and native quoted replies
+# Super-Org 钉钉回执卡片
 
-The transport sends complete messages using ordinary card updates. The first source receipt already uses **输出中** (`flowStatus=2`). The main agent's confirmation and subsequent result append below it in the same Markdown body, separated by dividers. When the round finishes, **完成** (`flowStatus=3`) preserves the entire body and removes the trailing spinner. There is no separate pending layout or `flowStatus=1` delivery. Both writing and finished Markdown blocks explicitly use `isStreaming=false`: this is full-message updating, not token streaming.
+钉钉通常以文本或 Markdown 发送项目消息。启用 AI 卡片后，支持绑定卡片的工单轮次可在同一卡片里累计显示接收回执、Agent 确认与实际结果。卡片以工单和会话为范围，新的追问可以产生新的处理轮次。 [钉钉项目群部署](../docs/deployment.zh-CN.md#钉钉项目群)
 
-The transport's `markdown` starts with a fixed receipt identifying the source, preferring the existing event label (for example, `GitHub Main CI`), otherwise the Trigger's Source name. Confirmation and result text comes from the agents, not fixed task examples. `AIPending` only renders the trailing processing spinner; all messages use the existing `MarkdownBlock` binding. The receipt remains visible but does not count as the agent's required confirmation. Import and publish the updated template as well as rebuilding and restarting the service for this layout to appear in existing deployments.
+## 导入并发布
 
-In the editor's Mock **public data** field, paste the flat contents of `cardData` (for example, `{"markdown":"Received GitHub Main CI."}`), not an object wrapping it in another `cardData`. Use the writing preview for the receipt and confirmation; use the completed preview for the final accumulated result.
+1. 为机器人应用授予 `Card.Instance.Write` 权限，在平台创建「消息卡片 → AI 卡片」。
+2. 使用编辑器的「导入卡片模板」导入完整的 [发布模板](dingtalk-superagent.json)。结构可在 [编辑器源文件](dingtalk-superagent.editor.json)查看。
+3. 确认只有一个 AI 根节点，其下是「输出中」和「完成」两个并列状态，`flowStatus` 分别为 `2` 和 `3`。
+4. 在变量 Mock 中保存平铺的公开数据，例如 `{"markdown":"已收到，正在确认。"}`。预览输出中和完成状态。输出中在累计正文后显示「处理中…」，完成状态保留原文并移除等待提示。
+5. 发布模板，在 `.env` 设置 `DINGTALK_CARD_TEMPLATE_ID` 和实际机器人名称 `DINGTALK_ROBOT_NAME`，重启服务。模板变更后需重新发布。
 
-The active card is scoped to the ticket and conversation. A new user followup receives a new writing card, which becomes the active card when feedback for that turn is sent. Message IDs and appended text are persisted in Source KV, so retries and transport restarts do not duplicate feedback. Worker reports still go through the original main-agent reply tools and Outbox; the transport does not publish worker reports on its own. The writing state describes a request waiting for its result, not a continuously running main agent.
+## 引用卡片继续原工单
 
-The source receipt stays at the top as the main agent's confirmation and result arrive. While work continues, a divider below the accumulated response is followed by the native `AIPending` spinner labeled **处理中…**. Only this trailing waiting area is replaced by subsequent content; earlier messages are retained. The completed state has no spinner. Both states end with a divided footer: **引用此卡片以回复消息。** This layout requires importing and publishing the updated template as well as restarting the rebuilt service.
+在客户端使用原生「回复／引用回复」，@ 机器人后发送补充信息。卡片摘要和正文都包含 `#<12 位工单短 ID>`，客户端回调如果包含原消息摘要，来源适配器可以在同群恢复工单。若引用内容只有不透明 ID，在消息中带上卡片上的工单短 ID。当前指令和引用原文分别读取。
 
-## Import the complete AI template
+在同群有两条工单时，用真实客户端分别引用卡片，检查补充输入进入正确的工单。桌面和移动端可能携带不同字段，编辑器预览只用于检查布局。诊断时可核对入站记录的 `referenceSource` 和 `referenceResolved`。
 
-1. Grant the existing app `Card.Instance.Write`.
-2. Create a **消息卡片 → AI 卡片** associated with the bot.
-3. Use the editor's top-right tools menu **导入卡片模板** with [dingtalk-superagent.json](dingtalk-superagent.json). The readable source is [dingtalk-superagent.editor.json](dingtalk-superagent.editor.json). The import declares `extension.extendType=AI` and `aiStatusList=[2,3]`; it must replace the complete AI template, not insert a normal card inside the existing AI content area.
-4. Open **变量 → Mock** and save the imported mock data so the editor compiles the preview rich text. Before saving/publishing, inspect the outline: one AI root, with two sibling status containers (2 and 3), and no nested status containers. Preview the source receipt, cumulative confirmation and cumulative result. Only writing has the trailing spinner. Completed feedback must display the task ID and all accumulated messages. This does not validate live quote callbacks.
-5. Set `DINGTALK_CARD_TEMPLATE_ID` to the published template ID and `DINGTALK_ROBOT_NAME` to the actual bot name.
+## 投递与状态
 
-## Reply and retain the task
+首条平台回执创建卡片。后续通过卡片实例更新发送完整 Markdown 正文，完成时保留累计内容。工单处理状态来自执行记录，卡片的「处理中」表示本轮尚在等待结果。
 
-Use the client's native **回复 / 引用回复** on a feedback card, mention the bot, and send the followup as an ordinary group message. The transport puts `#<12-character task ID>` first in both the card summary (`summaryContent → title`) and Markdown body.
-
-The receiver reads `isReplyMsg/repliedMsg` in either `text` or `content` (including JSON-encoded content). If the quoted sender matches the bot's actual `chatbotUserId`, it extracts a task reference from the quoted summary/text or `cardContent` TEXT nodes and reuses the existing task-reference resolver. A reference typed in the new message takes precedence. Cross-group, unknown and ambiguous references never route to another task. The new user text remains separate from the quoted text. Source KV retains the quote metadata/body for diagnosis.
-
-**Live acceptance is still required for this AliDing client.** Public callback examples establish quoted-message fields, but do not guarantee this client's AI-card quote includes our summary or task ID, or automatically mentions the bot. If the client sends only an opaque message ID or omits the task-bearing summary, automatic task recovery remains unavailable; add the displayed task ID to the new message. Do not infer the most recent task in a group.
-
-The earlier custom **回复** button was invalid: the current AliDing editor has no JSAPI action in either its button actions or event chain. It normalized the unsupported `callAPI` action to an empty URL. The corrected template removes that control instead of claiming `biz.chat.sendReplyToInputPanel` works in this container. There is no private card submission or robot-authored echo.
-
-Verify on the real client: quote a card with two tasks in the same group, send a followup mentioning the bot without typing an ID, and inspect the received trigger for `referenceSource=quote`, `referenceResolved=true`, and the correct task thread/worker. Test desktop and mobile. If unresolved, inspect the persisted quote (not credentials or session webhooks) before extending the mapping.
-
-## Delivery
-
-Creation uses `POST /v1.0/card/instances/createAndDeliver`; updates use `PUT /v1.0/card/instances`. Source KV and the original Outbox retain pending receipt, retry and delivery ownership. No card-interaction callback or public HTTP endpoint is added. Without a configured template, the existing text transport remains active.
-
-References: [official card examples](https://github.com/open-dingtalk/dingtalk-card-examples), [official AI status implementation](https://github.com/open-dingtalk/dingtalk-stream-sdk-python/blob/main/dingtalk_stream/card_replier.py), [quoted callback report in the official Stream SDK repository](https://github.com/open-dingtalk/dingtalk-stream-sdk-go/issues/22), [captured interactiveCard quote body](https://github.com/soimy/openclaw-channel-dingtalk/issues/598).
+状态、消息 ID 和累计正文由钉钉适配器维护，出站队列保存实际投递结果。模板为空时使用常规发送方式。 [沟通事件与发送回执](../docs/events/communication.zh-CN.md)

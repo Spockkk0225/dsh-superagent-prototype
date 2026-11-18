@@ -1,8 +1,8 @@
 # 项目事件配置
 
-配置按**已注册事件源**组织。每个来源维护自己的事件类型、数据校验、默认值和说明；来源名称与类别没有固定枚举。GitHub 使用 `sources.github`，未来安装 GitLab 适配器后使用 `sources.gitlab`。两者即使发布同一种通用事件，也可以独立设置。
+Super-Org 按**已注册事件源**组织项目事件。每个来源维护自己的事件类型、数据校验、默认值和说明；来源名称与类别没有固定枚举。GitHub 使用 `sources.github`，未来安装 GitLab 适配器后使用 `sources.gitlab`。两者即使发布同一种通用事件，也可以独立设置。
 
-来源结构与扩展契约见[事件源结构](../source-adapters.zh-CN.md)。所有项目来源共用现有 SQLite 有序事件队列、事务、Effects 和 Outbox。来源负责接入并描述事实，事件处理器负责状态与动作，Agent 根据上下文决定需要哪些已发布工具。配置文件的组织不新增一套流程引擎，也不改变人工验收授权。
+来源结构与扩展契约见[事件源结构](../source-adapters.zh-CN.md)。所有项目来源共用现有 SQLite 有序事件队列、事务、Effects 和 Outbox。来源负责接入并描述事实，事件处理器负责状态与动作，Agent 根据上下文决定需要哪些已发布工具。授权和版本规则由领域操作统一核对。 [架构设计](../architecture.zh-CN.md)
 
 ## 按来源维护一份 JSON
 
@@ -20,7 +20,7 @@
 | `project` | [项目默认值](../../config/events/project.defaults.json) | 任务就绪与依赖解除，[自主跟进](follow-up.zh-CN.md) |
 | `clock` | [时钟默认值](../../config/events/clock.defaults.json) | 一次检查到期，[自主跟进](follow-up.zh-CN.md) |
 
-这张表是当前安装情况，不是来源白名单。每个文件从同一注册表导出；自动测试检查文件与注册默认值一致。新增来源注册后，查询接口立即返回该来源的独立配置模板，不需要修改配置解析器或增加事件名判断。
+这些文件对应当前注册表中的面向项目事件，自动测试检查文件与注册默认值一致。飞书当前提供消息和工单能力，待注册项目事件后再生成自己的项目事件模板。新增来源注册后，查询接口立即返回该来源的独立配置模板，不需要修改配置解析器或增加事件名判断。
 
 例如 GitHub 的一项配置：
 
@@ -126,3 +126,5 @@ const mergeRequestUpdated: ProjectEventDefinition = {
 - `GET /orchestrator/api/projects/:id/checks`：检查预约与到期状态。
 - `GET /orchestrator/api/projects/:id/agent-runs`：实际 Agent 决定与工具结果。
 - [阶段验收记录](acceptance.zh-CN.md)、[2048 人工验收清单](../2048-manual-acceptance.zh-CN.md)。
+
+查看具体动作及记录见[项目 Agent 工具](project-tools.zh-CN.md)和[推进记录](project-history.zh-CN.md)。

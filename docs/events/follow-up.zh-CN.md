@@ -27,7 +27,7 @@
 
 ## Agent 决定，服务端约束
 
-事件只唤起当前选择的管理 Agent。Agent 读取最新目标、成员、任务、工单和运行能力，选择启动原任务、提醒人工负责人、说明缺项、预约检查或者不行动。服务器不会把事件机械翻译成 `task.start`。默认指导鼓励条件充分时开始执行，具体调用、参数和结果保存到项目 Agent 记录中。
+事件唤起项目所选 Agent。Agent 读取最新目标、成员、任务、工单和运行能力，选择启动原任务、提醒人工负责人、说明缺项、预约检查或者不行动。服务器不会把事件机械翻译成 `task.start`。默认指导鼓励条件充分时开始执行，具体调用、参数和结果保存到项目 Agent 记录中。
 
 自主跟进仅可检查状态、启动当前事件任务、向原工单补充上下文以及预约/取消检查。它不能创建额外任务、修改目标和分工、批准权限或调用人工验收工具。看板和群里仍共用原有工具和领域校验。暂停项目、关闭自动推进、修改任务范围、撤回依赖或关闭事件后，未落地的旧提案不能继续操作。
 
@@ -84,7 +84,7 @@
 
 ## 什么会产生事件
 
-执行器调用真实 `orchestrator_report` 后，Engine 在同一 SQLite 事务中产生 `ticket.reported` 事实。执行来源检查：报告明确为 blocked，或当前报告保留了待人工回答的问题，才产生 `task.blocked`。普通进度不主动发群消息，ready 仍由 `delivery.ready` 处理。failed 且没有人工问题的报告不在本事件范围，后续另接失败事件。
+执行器调用真实 `orchestrator_report` 后，Engine 在同一 SQLite 事务中产生 `ticket.reported` 事实。执行来源检查：报告明确为 blocked，或当前报告保留了待人工回答的问题，才产生 `task.blocked`。普通进度不主动发群消息，ready 仍由 `delivery.ready` 处理。failed 且没有人工问题的报告不在本事件范围，应在工单状态中查看失败详情。
 
 实例携带项目、任务、工单、当前 Assignment、报告时间、问题引用（如有）、交付版本和通知标识。消费前再核对任务仍进行中、仍关联该工单、版本和报告仍为当前、工单没有结束。旧报告、被替换或已回答的问题、取消和新执行都不能触发过期提醒。
 
@@ -125,7 +125,7 @@ flowchart LR
 4. 若问题在排队期间已经解决或任务已取消，不应再发过期提醒。
 5. 处理外部条件后，在原任务中补充信息继续原工单，不用新建任务冒充恢复。部署沙箱在服务启动时确定，群里回复“可以”不能直接更改它。
 
-查询使用现有项目详情、Agent 执行记录和 `GET /orchestrator/api/projects/events?projectId=...`；事件 type 为 task.blocked，data.noticeId 可与本机 Outbox 回执关联。详见[逐步验收记录](acceptance.zh-CN.md)。
+查询使用现有项目详情、Agent 执行记录和 `GET /orchestrator/api/projects/events?projectId=...`；事件 type 为 task.blocked，data.noticeId 可与本机 Outbox 回执关联。详见[验证记录](acceptance.zh-CN.md)。
 
 ## 自主跟进与同一问题去重
 

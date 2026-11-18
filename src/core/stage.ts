@@ -1,11 +1,11 @@
-/** Ticket stage classification and retry eligibility (docs/003). */
+/** Ticket stage classification and retry eligibility. */
 import { latestAssignment, waitsForPerson, type Ticket } from './model.ts'
 
 /** High-level execution stage of a ticket: waiting on a person, actively working or queued, idle between turns, or ended. */
 export type TicketStage = { stage: 'person'; action: 'delivery' | 'answer' | 'review' | 'blocked' | 'failed' }
   | { stage: 'working'; action?: 'queued' } | { stage: 'idle' } | { stage: 'ended' }
 
-/** Classifies a ticket's stage; the rules follow the table in docs/003 in order, where the first matching row wins. */
+/** Classifies a ticket's stage; the first matching rule wins. */
 export function ticketStage(ticket: Ticket): TicketStage {
   if (ticket.ended) return { stage: 'ended' }
   if (ticket.delivery) return { stage: 'person', action: 'delivery' }

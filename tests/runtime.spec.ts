@@ -555,7 +555,7 @@ it('projects read models for the management page and removes thread subscription
   runtime.store.threads.describe(thread.key, { label: 'Named by its source' })
   expect(threadList(viewsOf(runtime), 'all', 0, 20).items[0]).toMatchObject({ title: 'Named by its source' })
   expect((await api('GET', 'state')).body).not.toHaveProperty('tickets')
-  // scripts/dsh-superagent and agents read health from GET state (docs/006, Management API); settings and their revisions have their own route.
+  // scripts/dsh-superagent and agents read health from GET state; settings and their revisions have their own route.
   expect((await api('GET', 'state')).body).toMatchObject({ health: { runtime: { state: expect.any(String) } }, paused: false, load: { maxWorkers: 3 } })
   expect((await api('GET', 'settings')).body).toMatchObject({ sources: expect.arrayContaining([expect.objectContaining({ id: 'github',
     revision: expect.any(Number), value: expect.objectContaining({ enabled: true }) })]), blocks: { policy: { revision: expect.any(Number) } } })

@@ -17,6 +17,7 @@
 | `task.stop` | `taskId` | 停止当前执行，保留历史 |
 | `task.follow_up` | `taskId`、`text` | 向当前执行 Agent 传递补充信息 |
 | `issue.create` | `taskId` | 为任务创建或取回 Issue，使用项目关联的仓库；远端完成后回写并通知 |
+| `discussion.reply` | `taskId`、`url`、`text` | 向任务关联的 PR 或行讨论登记可靠回复，实际发送以回执为准 |
 | `delivery.submit` | `taskId`、`summary`、可选 `links` | 提交人工任务的真实交付证据，排队生成版本化验收请求 |
 | `review.decide` | `taskId`、`reviewId`、accepted/rejected、`reason` | 根据成员明确反馈提交本版验收决定，检查身份、引用和当前版本 |
 

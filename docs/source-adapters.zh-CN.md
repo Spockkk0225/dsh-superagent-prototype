@@ -1,8 +1,8 @@
-# 事件源结构与扩展
+# Super-Org 事件源适配
 
 事件源按提供者收敛为一个文件：GitHub、钉钉、飞书、本地请求分别位于 `src/sources/github.ts`、`dingtalk.ts`、`feishu.ts`、`request.ts`。每个文件包含该来源的配置、协议数据校验、归一化、上下文读取、运输和回写能力；只有公共契约与可复用机制放在共享文件。
 
-Node.js / TypeScript 支持类、抽象类和接口。此设计把所有来源的共同边界表达为 `SourceKind` 接口；真正共享执行步骤的仓库来源使用 `RepositorySource` 抽象基类，GitHub 继承它。Stream、CLI 消费和本地 HTTP 请求保留各自生命周期，不创建没有共同工作的空基类。
+所有来源遵循 `SourceKind` 接口。GitHub 继承 `RepositorySource`，使用共同的仓库观察流程。钉钉 Stream、飞书 CLI 消费和本地 HTTP 请求各自管理接入生命周期。
 
 ```mermaid
 classDiagram
@@ -22,6 +22,7 @@ classDiagram
   class RepositorySource {
     <<abstract>>
     poll()
+    accepts()*
     read()*
     feedback()*
   }

@@ -1,5 +1,5 @@
 /**
- * Bilingual UI dictionaries (`[zh, en]`) and glossary groupings, following the domain terms in `docs/001-domain.md`.
+ * Bilingual UI dictionaries (`[zh, en]`) and glossary groupings, using the project and execution domain terms.
  */
 import { USER_ERRORS } from '../core/errors.ts'
 import { SETUP_PROBLEMS } from '../setup.ts'
@@ -279,7 +279,7 @@ const TEXT = {
   'project.answer': ['结论', 'Answer'],
   'project.answered': ['已决定', 'Decided'],
   'project.pending': ['待决定', 'Pending'],
-  'project.ticket': ['Super Agent 工单 ID', 'Super Agent ticket ID'],
+  'project.ticket': ['工单 ID', 'Ticket ID'],
   'project.tickets': ['Agent 执行记录', 'Agent runs'],
   'project.ticketsHelp': ['每次把任务交给 Agent，系统都会生成一条有编号的执行记录，也叫工单。这里可以查看执行状态、待回复的问题和交付结果。在关联任务中确认验收。', 'Each time you send a task to the agent, it creates a numbered run, also called a ticket. Check its status, questions, and results here. Accept the delivery in the linked task.'],
   'project.ticketsEmpty': ['暂无执行记录。打开一项任务，点击「交给 Agent」或「关联已有执行记录」。', 'No runs yet. Open a task and choose Send to agent or Link an existing run.'],
@@ -1008,7 +1008,7 @@ const TEXT = {
   'setup.feishuCliFailed': ['机器人的 lark-cli 不可用。', SETUP_PROBLEMS.feishuCliFailed[1]],
   'setup.feishuNoApp': ['机器人的 lark-cli 的 auth status 没有报告应用。', SETUP_PROBLEMS.feishuNoApp[1]],
   'setup.feishuBotNotReady': ['应用 {app} 的机器人身份状态是 {status}；用 lark-cli 配置应用密钥。', SETUP_PROBLEMS.feishuBotNotReady[1]],
-  'setup.feishuUserIdentity': ['机器人的 lark-cli 允许用户身份（strict mode 为 {mode}）；按 docs/006-deployment.md 给机器人一份 strict mode 为 bot 的单独配置。', SETUP_PROBLEMS.feishuUserIdentity[1]],
+  'setup.feishuUserIdentity': ['机器人的 lark-cli 允许用户身份（strict mode 为 {mode}）；参照上游 DSH 部署指南为机器人单独配置 strict mode 为 bot 的账号。', SETUP_PROBLEMS.feishuUserIdentity[1]],
   'setup.feishuNoBot': ['飞书机器人接口没有返回机器人的 open_id。', SETUP_PROBLEMS.feishuNoBot[1]],
   'healthCode.setupPending': ['等待部署检查', HEALTH_TEXT.setupPending],
   'healthCode.sourceOff': ['已关闭', HEALTH_TEXT.sourceOff],
