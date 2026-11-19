@@ -25,6 +25,8 @@ export const Config = s.object({
 export type DeploymentConfig = ReturnType<typeof Config>
 export interface Machine {
   stateDir: string
+  /** Headless project hosts can operate independently of a watched GitHub repository. */
+  githubOptional?: boolean
   promptMaxChars: Volatile<number>
   admissionContextMaxPages: Volatile<number>
   admissionContextTimeoutMs: Volatile<number>
@@ -38,7 +40,7 @@ const MOVED: Record<string, string> = {
 /** Read machine settings and reject unknown configuration keys (naming where deprecated keys moved). */
 export function machineOf(config: DeploymentConfig): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
-  if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; docs/006-deployment.md lists the keys`)
+  if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; see the upstream DSH deployment guide for its profile settings`)
   const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs } = config
   return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs }
 }
@@ -90,11 +92,19 @@ function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
 export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
   const { stateDir } = machine
   const accounts = GithubAccountsSchema.parse(github ?? {})
-  const remote = accounts.repository
-  if (!remote) throw new SetupError('repositoryUnset')
-  if (!accounts.cli) throw new SetupError('agentCliUnset')
+  const remote = accounts.repository || accounts.app?.installations?.[0]?.repository || ''
+  const independent = machine.githubOptional && !accounts.repository
+  const unavailable = { ...machine, repository: '', github: { cli: '', login: '', noreply: '' } }
+  if (!remote && (!independent || accounts.app)) throw new SetupError('repositoryUnset')
+  if (!accounts.cli) {
+    if (independent) return unavailable
+    throw new SetupError('agentCliUnset')
+  }
   let cli: string
-  try { cli = executable(accounts.cli, path, workerBin(stateDir)) } catch (error) { throw new SetupError('agentCliMissing', { output: reason(error) }) }
+  try { cli = executable(accounts.cli, path, workerBin(stateDir)) } catch (error) {
+    if (independent && !accounts.app) return unavailable
+    throw new SetupError('agentCliMissing', { output: reason(error) })
+  }
   if (accounts.app) {
     try {
       const app = accounts.app
@@ -121,13 +131,21 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
       const bot = z.object({ id: z.number().int().positive(), login: z.literal(login) })
         .parse(await appRequest(`/users/${encodeURIComponent(login)}`, credential.token))
       const routedApp = app.installations ? { ...app, installations: app.installations.map((route, index) => ({ ...route, repository: repositories[index]! })) } : app
-      return { ...machine, repository, github: { cli: await writeAppCli({ ...config, repository, app: routedApp }), auth: 'app', repositories, login,
+      return { ...machine, repository: independent ? '' : repository, github: { cli: await writeAppCli({ ...config, repository, app: routedApp }), auth: 'app', repositories, login,
         noreply: accounts.commitEmail ?? `${bot.id}+${login}@users.noreply.github.com` } }
     } catch { throw new SetupError('githubAppFailed') }
   }
-  const text = await probe([cli, 'api', 'user']).catch((error: unknown) => { throw new SetupError('agentCliSignedOut', { output: reason(error) }) })
+  const text = await probe([cli, 'api', 'user']).catch((error: unknown) => {
+    if (independent) return ''
+    throw new SetupError('agentCliSignedOut', { output: reason(error) })
+  })
   const agent = parsed(GithubUser, text)
-  if (!agent) throw new SetupError('agentCliNoAccount')
+  if (!agent) {
+    if (independent) return unavailable
+    throw new SetupError('agentCliNoAccount')
+  }
+  if (!remote) return { ...machine, repository: '', github: { cli, login: agent.login,
+    noreply: accounts.commitEmail ?? `${agent.id}+${agent.login}@users.noreply.github.com` } }
   // Use the canonical repository name returned by GitHub so renamed repositories match incoming notifications.
   const access = parsed(RepositoryAccess, await probe([cli, 'api', `repos/${remote}`, '--jq', '{name: .full_name, push: .permissions.push}']).catch((error: unknown) => {
     throw new SetupError('repositoryUnreadable', { account: agent.login, repository: remote, output: reason(error) })

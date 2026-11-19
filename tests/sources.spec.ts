@@ -4,11 +4,11 @@ import { backfillChat, consumerRetry, feishuKind, feishuTriggerId, feishuRef, fe
   from '../src/sources/feishu.ts'
 import { KV } from '../src/kv.ts'
 import { apply as applyFeishu, pollThreads as pollFeishuThreads } from '../src/sources/feishu.ts'
-import { runFeishu } from '../src/sources/feishu-loops.ts'
-import { commentTrigger, githubAddress, githubChannel, issueTrigger, type GithubComment, type GithubIssue } from '../src/sources/github-trigger.ts'
-import { claimPull, observePull, pullEndNotices, pullOf, ticketBranch, type Pull } from '../src/sources/github-pull.ts'
-import { ciCounts, ciFact, ciSummary } from '../src/sources/github-read.ts'
-import { apply as applyGithub, githubKind, pollFailure, pollRound } from '../src/sources/github.ts'
+import { runFeishu } from '../src/sources/feishu.ts'
+import { commentTrigger, githubAddress, githubChannel, issueTrigger, type GithubComment, type GithubIssue } from '../src/sources/github.ts'
+import { claimPull, observePull, pullEndNotices, pullOf, ticketBranch, type Pull } from '../src/sources/github.ts'
+import { ciCounts, ciFact, ciSummary } from '../src/sources/github.ts'
+import { apply as applyGithub, githubKind, pollFailure, pollProjectRepositories, pollRound } from '../src/sources/github.ts'
 import { pollThreads as pollGithubThreads } from '../src/sources/github.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 import { cursorAt, POLL_HORIZON_MS } from '../src/sources/poll.ts'
@@ -831,6 +831,54 @@ describe('github source', () => {
   const issue = (number: number, fields: Partial<GithubIssue> = {}): GithubIssue => ({ id: 1000 + number, number, title: 'Login fails',
     body: 'details', state: 'open', created_at: '2026-09-09T00:00:00Z', html_url: `https://github.com/acme/widgets/issues/${number}`,
     user: { login: 'alice', type: 'User' }, ...fields })
+  it('polls each linked repository once, isolates Issue and PR numbers, and reports failures per repository', async () => {
+    const since = new Date(Date.now() - 90_000).toISOString()
+    let bindings = ['acme/widgets', 'acme/alpha', 'ACME/alpha', 'acme/beta', 'acme/unavailable'].map(repository => ({ repository, since }))
+    const h = host({ projectRepositories: () => bindings })
+    const saved = h.store.settings()
+    h.store.saveSettings({ ...saved, sources: { ...saved.sources, github: { enabled: true, config: {
+      ...saved.sources.github?.config, repository: 'acme/widgets', observeIssues: true, observePulls: true, observeComments: true,
+    } } } })
+    const reads: string[] = []
+    const now = new Date().toISOString()
+    const run = vi.spyOn(Commands.prototype, 'run').mockImplementation(async (_program, args) => {
+      const [, repository, path] = /^repos\/([^/]+\/[^/]+)\/(.*)$/.exec(args[1] ?? '') ?? []
+      if (!path || !repository) throw new Error('Expected a repository-specific read')
+      reads.push(`${repository}/${path.split('?')[0]}`)
+      if (repository === 'acme/unavailable') throw refused(404, 'Not Found')
+      const items = path.startsWith('issues?') ? [issue(12, { title: repository, html_url: `https://github.com/${repository}/issues/12`,
+        body: '@agent-bot please fix this', created_at: now, updated_at: now }),
+      issue(13, { title: 'A change', html_url: `https://github.com/${repository}/pull/13`, pull_request: { url: 'pull' }, created_at: now, updated_at: now })]
+        : path.startsWith('issues/comments?') ? [{ id: 44, body: 'PR feedback', user: { login: 'alice' },
+          html_url: `https://github.com/${repository}/pull/13#issuecomment-44`,
+          issue_url: `https://api.github.com/repos/${repository}/issues/13`, created_at: now, updated_at: now }] : []
+      return `HTTP/2.0 200 OK\r\nETag: "${repository}"\r\n\r\n${JSON.stringify(items)}`
+    })
+    try {
+      await pollProjectRepositories(h)
+      expect(reads.filter(read => read === 'acme/alpha/issues')).toHaveLength(1)
+      expect(reads.some(read => read.startsWith('acme/widgets/'))).toBe(false)
+      const threads = ['alpha', 'beta'].map(repo => h.store.read.threadTriggers(`github:acme/${repo}/issues/12`, 10))
+      expect(threads.map(items => items.length)).toEqual([1, 1])
+      expect(threads[0]![0]!.id).not.toBe(threads[1]![0]!.id)
+      for (const repo of ['alpha', 'beta']) {
+        const key = `github:acme/${repo}/pull/13`
+        expect(h.store.read.threadTriggers(key, 10)).toHaveLength(2)
+        expect(h.store.get(KV.github.stream(`acme/${repo}:issues`))).toMatchObject({ boundAt: since })
+        expect(h.store.get(KV.github.repositoryHealth(`acme/${repo}`))?.state).toBe('ready')
+        expect(h.sources.find(`https://github.com/acme/${repo}/pull/13`).threads).toEqual([key])
+      }
+      expect(h.store.get(KV.github.stream('issues'))).toBeUndefined()
+      expect(h.store.get(KV.github.repositoryHealth('acme/unavailable'))?.state).toBe('error')
+      expect(h.engine.candidate(threads[0]![0]!.id)).toBeUndefined()
+      bindings = bindings.filter(binding => binding.repository.toLowerCase() !== 'acme/alpha')
+      reads.length = 0
+      await pollProjectRepositories(h)
+      expect(reads.some(read => read.startsWith('acme/alpha/'))).toBe(false)
+      expect(reads).toContain('acme/beta/issues')
+      expect(h.store.read.threadTriggers('github:acme/beta/pull/13', 10)).toHaveLength(2)
+    } finally { run.mockRestore(); h.store.close() }
+  })
   /** GitHub as `pollRound` reads it after `since`: one notification per Issue, the Issues, and their conversation comments by number. */
   function notify(h: ReturnType<typeof host>, issues: GithubIssue[], comments: Record<number, GithubComment[]> = {},
     since = '2026-09-08T00:00:00.000Z') {

@@ -4,7 +4,7 @@
   "license": "MIT",
   "version": "0.1.0",
   "private": true,
-  "description": "A proactive agent for one GitHub repository, as a DSH (DeepSeek Harness) bundle: it listens to GitHub and optionally Feishu, evaluates requests under a Policy, turns authorized ones into Tickets, and executes each in its own DSH Session.",
+  "description": "Super-Org turns team discussions into project actions and coordinates execution, delivery, and human acceptance through durable events.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -50,7 +50,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm test && pnpm build",
-    "start:codex": "node lib/codex-cli.js"
+    "start:codex": "node lib/codex-cli.js",
+    "import:mission-control": "node lib/mission-control-import.js"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0",

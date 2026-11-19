@@ -1,5 +1,5 @@
 # Example profile configuration ($DSH_HOME/profiles/<profile>/cordis.patch.yml).
-# Replace <placeholders> before first start; see docs/006-deployment.md.
+# Replace <placeholders> before first start; see SETUP.md for the upstream DSH profile guide.
 - id: webserver
   config:
     host: 127.0.0.1

@@ -8,7 +8,7 @@ import type { OutboundMessage } from '../src/core/index.ts'
 import { Commands } from '../src/infra/commands.ts'
 import { HealthBoard } from '../src/infra/health.ts'
 import { sourceContextOf, type SourceContextDeps } from '../src/app/source-context.ts'
-import { feishuChannel, feishuTrigger, feishuTriggerId } from '../src/sources/feishu-trigger.ts'
+import { feishuChannel, feishuTrigger, feishuTriggerId } from '../src/sources/feishu.ts'
 import { testDeployment } from './fixtures/deployment.ts'
 import { feishuKind } from '../src/sources/feishu.ts'
 import { githubKind } from '../src/sources/github.ts'
@@ -108,7 +108,7 @@ describe('Source registry', () => {
     expect(sources.repliesTo({ ...reply, source: 'github' })).toBeUndefined()
   })
   it('finds what a search query names in each kind\'s terms', () => {
-    const sources = new SourceRegistry(() => SettingsSchema.parse({}))
+    const sources = new SourceRegistry(() => SettingsSchema.parse({ sources: { github: { enabled: true, config: { repository: 'acme/widgets' } } } }))
     sources.register(feishuKind); sources.register(githubKind)
     expect(sources.find('#12')).toEqual({ threads: ['github:12'], terms: [] })
     expect(sources.find('https://github.com/acme/widgets/pull/7#issuecomment-3')).toEqual({ threads: ['github:7'], terms: [] })

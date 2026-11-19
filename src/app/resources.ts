@@ -2,10 +2,10 @@
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { UserError, key, latestReport, reached, runningAssignment, threadKey, type Ticket, type Trigger } from '../core/index.ts'
 import { batchOf, inputMessage, triggerMessage, workerSessionId } from '../executor/dsh.ts'
-import { readGithub } from '../sources/github-read.ts'
-import { feishuReferences, feishuRead } from '../sources/feishu-read.ts'
+import { readGithub } from '../sources/github.ts'
+import { feishuReferences, feishuRead } from '../sources/feishu.ts'
 import { feishuRef } from '../sources/feishu.ts'
-import { feishuTriggerId } from '../sources/feishu-trigger.ts'
+import { feishuTriggerId } from '../sources/feishu.ts'
 import { ASSIGNMENTS, INPUTS, assignmentLine, decisionCard, decisionDetails, inputLine, newestPage, preview, textPage, threadCard, ticketCard,
   ticketDetails, triggerCard, type TicketThread } from './cards.ts'
 import { threadTitle } from './views/records.ts'

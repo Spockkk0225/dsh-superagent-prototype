@@ -83,6 +83,12 @@ describe('setup', () => {
     await needs('github', 'agentCliNoAccount', {}, { repository, cli: program(join(dir, 'bin', 'gh-anonymous'), `echo '{}'`) })
     expect(() => executable('nothing-here', join(dir, 'bin'))).toThrow('nothing-here is not an executable file on PATH')
   })
+  it('allows a headless project host to start with an account but no watched repository', async () => {
+    const optional = { ...machine(), githubOptional: true }
+    const account = await resolveDeployment(optional, { cli: 'gh' }, probe, path)
+    expect(account).toMatchObject({ repository: '', github: { login: 'Agent-Bot' } })
+    expect(await resolveDeployment(optional, {}, probe, path)).toMatchObject({ repository: '', github: { cli: '' } })
+  })
   it('reads the Feishu bot from a bot-only lark-cli, or finds none when the Feishu Source names no CLI', async () => {
     expect(await resolveFeishuBot(machine(), {}, probe, path)).toBeUndefined()
     expect(await resolveFeishuBot(machine(), { cli: 'lark-cli' }, probe, path)).toEqual({ cli: join(dir, 'bin', 'lark-cli'), appId: 'cli_bot', brand: 'lark', botId: 'ou_bot', name: 'Widgets Bot' })

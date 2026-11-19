@@ -1,9 +1,13 @@
 import { expect, it } from 'vitest'
+import { once } from 'node:events'
+import { get } from 'node:http'
+import { BlockList } from 'node:net'
 import { z } from 'zod'
-import { registerHttp } from '../src/app/http.ts'
+import { projectHttpServer, registerHttp } from '../src/app/http.ts'
 import { PromptConflict } from '../src/app/prompts.ts'
 import { SettingsConflict } from '../src/app/settings.ts'
 import type { HttpHost } from '../src/app/http.ts'
+import type { Store } from '../src/app/store.ts'
 import { SettingsSchema } from '../src/policy.ts'
 import { SetupError } from '../src/setup.ts'
 
@@ -92,6 +96,74 @@ it('answers only a same-origin request from the panel on the loopback address', 
   expect(await post({ host: 'localhost:3082', origin: 'http://localhost:3082' })).toMatchObject({ status: 200 })
   // Management routes require a loopback Web server.
   expect(() => serve({}, '0.0.0.0')).toThrow('Orchestrator management requires a loopback Web server')
+})
+
+it('requires the HTTPS project proxy and valid credentials before serving the public page or API', async () => {
+  const origin = new URL('https://projects.example.com')
+  const password = 'test-only-project-password'
+  const store = { keys: () => [] } as unknown as Store
+  const server = projectHttpServer(store, 0, '127.0.0.1', { publicAccess: { origin, username: 'projects', password } })
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('Expected a TCP server')
+  const page = '/orchestrator/projects'
+  const api = '/orchestrator/api/projects'
+  const call = (path: string, headers: Record<string, string> = {}) => new Promise<{
+    status: number | undefined; challenge: string | undefined; text: string
+  }>((resolve, reject) => {
+    get(`http://127.0.0.1:${address.port}${path}`, { headers: { host: origin.host, 'x-forwarded-proto': 'https', ...headers } }, response => {
+      let text = ''
+      response.setEncoding('utf8').on('data', chunk => { text += chunk })
+      response.on('end', () => resolve({ status: response.statusCode, challenge: response.headers['www-authenticate'], text }))
+      response.on('error', reject)
+    }).on('error', reject)
+  })
+  const authorization = `Basic ${Buffer.from(`projects:${password}`).toString('base64')}`
+  const apiHeaders = { authorization, origin: origin.origin, 'x-orchestrator-request': '1' }
+  try {
+    for (const path of [page, '/orchestrator/projects.js', api]) {
+      const response = await call(path)
+      expect(response.status).toBe(401)
+      expect(response.challenge).toMatch(/^Basic /)
+    }
+    expect((await call(page, { authorization: 'Basic d3Jvbmc=' })).status).toBe(401)
+    expect((await call(page, { authorization, 'x-forwarded-proto': 'http' })).status).toBe(403)
+    expect((await call(page, { authorization, host: 'localhost' })).status).toBe(403)
+    expect((await call(page, { authorization })).status).toBe(200)
+    expect((await call(api, { ...apiHeaders, origin: 'https://other.example.com' })).status).toBe(403)
+    expect((await call(api, { authorization })).status).toBe(403)
+    expect(JSON.parse((await call(api, apiHeaders)).text)).toEqual([])
+    expect((await call('/orchestrator/api/state', apiHeaders)).status).toBe(404)
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())) }
+})
+
+it('admits a preview client only when its network is enabled and still checks the API origin', async () => {
+  const store = { keys: () => [] } as unknown as Store
+  const previewAddress = '192.0.2.10'
+  const previewHost = `${previewAddress}:3090`
+  const clients = new BlockList()
+  clients.addSubnet('127.0.0.0', 24)
+  // Use the loopback client as a distinct peer so the test can run on any host.
+  for (const previewNetwork of [undefined, clients]) {
+    const server = projectHttpServer(store, 3090, previewAddress, { previewNetwork })
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Expected a TCP server')
+    const call = (path: string, origin = `http://${previewHost}`) => new Promise<number | undefined>((resolve, reject) => {
+      get(`http://127.0.0.1:${address.port}${path}`, { headers: { host: previewHost, origin, 'x-orchestrator-request': '1' } }, response => {
+        response.resume()
+        resolve(response.statusCode)
+      }).on('error', reject)
+    })
+    try {
+      const expected = previewNetwork ? 200 : 403
+      expect(await call('/orchestrator/projects')).toBe(expected)
+      expect(await call('/orchestrator/api/projects')).toBe(expected)
+      expect(await call('/orchestrator/api/projects', 'http://other.example.com')).toBe(403)
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())) }
+  }
 })
 
 it('answers a prompt save that lost a race with 409, and a settings body over 128 KiB with 400', async () => {

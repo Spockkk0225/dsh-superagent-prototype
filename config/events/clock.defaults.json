@@ -1,0 +1,12 @@
+{
+  "sources": {
+    "clock": {
+      "on": {
+        "check.due": {
+          "enabled": true,
+          "description": "一次已保存的检查时间到达，唤起 Agent 核对当前任务。"
+        }
+      }
+    }
+  }
+}

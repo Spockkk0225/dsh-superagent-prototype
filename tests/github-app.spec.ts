@@ -9,7 +9,7 @@ import { GithubAppSchema, appCacheDirectory, appJwt, commandRepository, installa
 import { resolveDeployment } from '../src/deployment.ts'
 import { testDeployment, testMachine } from './fixtures/deployment.ts'
 import { writeEnvironment, workerGitConfig } from '../src/infra/environment.ts'
-import { agentPull } from '../src/sources/github-pull.ts'
+import { agentPull } from '../src/sources/github.ts'
 
 const exec = promisify(execFile)
 const withInput = (file: string, args: string[], input: string, env = process.env) => new Promise<string>((resolve, reject) => {

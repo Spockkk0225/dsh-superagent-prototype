@@ -80,6 +80,9 @@ export class Store implements Repositories {
             CREATE TABLE IF NOT EXISTS effect (kind TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, seq INTEGER NOT NULL,
               generation INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '', due INTEGER NOT NULL,
               since TEXT NOT NULL, PRIMARY KEY (kind, key));
+            CREATE TABLE IF NOT EXISTS project_event (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+              value TEXT NOT NULL, recorded_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', reason TEXT NOT NULL DEFAULT '');
+            CREATE INDEX IF NOT EXISTS project_event_pending ON project_event(seq) WHERE status='pending';
             CREATE INDEX IF NOT EXISTS trigger_at ON trigger(at);
             CREATE INDEX IF NOT EXISTS trigger_thread_at ON trigger_thread(thread, at);
             CREATE INDEX IF NOT EXISTS decision_thread ON decision(thread);
@@ -167,10 +170,33 @@ export class Store implements Repositories {
   }
   /** Writes a typed KV record under `name`. */
   set<V>(name: Key<V>, value: V): void {
-    this.db.prepare('INSERT INTO kv VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(name, JSON.stringify(value))
+    const observers = [...this.observers].filter(item => name.startsWith(item.prefix))
+    const write = () => {
+      const previous = observers.length ? this.get(name) : undefined
+      this.db.prepare('INSERT INTO kv VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(name, JSON.stringify(value))
+      for (const observer of observers) observer.changed(value, previous)
+    }
+    if (observers.length) this.atomic(write)
+    else write()
+  }
+  private readonly observers = new Set<{ prefix: string; changed(value: unknown, previous: unknown): void }>()
+  /** Observe aggregate writes synchronously in their transaction; observers may persist facts, never perform remote work. */
+  observe<V>(family: Family<V, never>, changed: (value: V | undefined, previous: V | undefined) => void): () => void {
+    const observer = { prefix: family.prefix, changed: changed as (value: unknown, previous: unknown) => void }
+    this.observers.add(observer)
+    return () => { this.observers.delete(observer) }
   }
   /** Deletes the KV record at `name`. */
-  delete(name: string): void { this.db.prepare('DELETE FROM kv WHERE key=?').run(name) }
+  delete(name: string): void {
+    const observers = [...this.observers].filter(item => name.startsWith(item.prefix))
+    const remove = () => {
+      const previous = observers.length ? this.get(name) : undefined
+      this.db.prepare('DELETE FROM kv WHERE key=?').run(name)
+      for (const observer of observers) observer.changed(undefined, previous)
+    }
+    if (observers.length) this.atomic(remove)
+    else remove()
+  }
   /** Returns all KV keys belonging to `family` or starting with `prefix`. */
   keys<V>(family: Family<V, never>): Key<V>[]
   keys(prefix: string): string[]
@@ -253,6 +279,9 @@ export class Store implements Repositories {
   /** Outbox message receipts for channel delivery; only `Outbox` writes to `receipts`. */
   readonly receipts = {
     get: (id: string): Receipt | undefined => this.values<Receipt>('SELECT value FROM outbox WHERE id = ?', id)[0],
+    correlated: (id: string): Receipt | undefined => this.values<Receipt>("SELECT value FROM outbox WHERE value ->> '$.correlation' = ? ORDER BY rowid DESC LIMIT 1", id)[0],
+    /** Explicit origin correlation keeps project audit independent of conversation sharing and message-ID conventions. */
+    forProject: (projectId: string): Receipt[] => this.values("SELECT value FROM outbox WHERE value ->> '$.origin.projectId' = ? ORDER BY rowid DESC LIMIT 100", projectId),
     /** Pending message receipts, oldest first. */
     waiting: (): Receipt[] => this.values("SELECT value FROM outbox WHERE value ->> '$.status' = 'pending' ORDER BY rowid"),
     /** True if an earlier message for the same ticket and conversation is still pending with fewer than `failures` consecutive failed `reply` effect attempts. */
@@ -273,11 +302,11 @@ export class Store implements Repositories {
      */
     settle: (message: OutboundMessage, outcome: 'sent' | DropReason): void => {
       const settled = outcome === 'sent' ? { status: 'sent' } : { status: 'dropped', dropped: { at: new Date().toISOString(), reason: outcome } }
-      const { id, channel, text, kind, ticketId } = message
+      const { id } = message
       const updated = this.db.prepare("UPDATE outbox SET value = json_patch(value, ?) WHERE id = ? AND value ->> '$.status' = 'pending'")
         .run(JSON.stringify(settled), id)
       if (!Number(updated.changes)) this.db.prepare('INSERT OR IGNORE INTO outbox (id, value) VALUES (?, ?)')
-        .run(id, JSON.stringify({ id, channel, text, kind, ...ticketId ? { ticketId } : {}, ...settled }))
+        .run(id, JSON.stringify({ ...message, ...settled }))
     },
     /**
      * Withdraws a pending message that has not yet been sent.

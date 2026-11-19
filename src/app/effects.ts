@@ -7,8 +7,19 @@ export class Later extends Error {}
 export const FAILURES_BEFORE_ERROR = 3
 import type { HealthBoard, HealthEntry } from '../infra/health.ts'
 import type { Store } from './store.ts'
+import type { ProjectPlanRequest } from './project-planning.ts'
+import type { ProjectIssueRequest } from './project-issues.ts'
+import type { ProjectActionMessage } from './project-actions.ts'
 
 export interface EffectPayloads {
+  'project-issue-sync': { id: string }
+  'message-compose': { id: string }
+  'project-events': Record<string, never>
+  'project-agent': { runId: string }
+  'project-plan': ProjectPlanRequest
+  'project-issue': ProjectIssueRequest
+  'project-issue-intent': ProjectActionMessage
+  'project-action': ProjectActionMessage
   /** Build an Eval's candidate card and relay it to the main Session; the key is the Eval ID. */
   assessment: { triggerId: string }
   /** Launch a pending Assignment; the key is the Assignment ID. */

@@ -15,8 +15,8 @@ import type { DroppedReply, HistoryView, Problem, PromptsView, SetupView, Source
 import { SETUP_FIELDS } from '../../src/deployment.ts'
 import { EvalConfigSchema, ExecutorConfigSchema, PolicyConfigSchema, SettingsSchema } from '../../src/policy.ts'
 import { SetupError, type SetupCode } from '../../src/setup.ts'
-import { feishuChannel } from '../../src/sources/feishu-trigger.ts'
-import { githubChannel } from '../../src/sources/github-trigger.ts'
+import { feishuChannel } from '../../src/sources/feishu.ts'
+import { githubChannel } from '../../src/sources/github.ts'
 import { feishuKind } from '../../src/sources/feishu.ts'
 import { githubKind } from '../../src/sources/github.ts'
 import type { Health } from '../../src/sources/host.ts'
@@ -294,6 +294,37 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'POST requests': { body: true, answer: () => ({ trigger_id: 'request:local', status: 'stored' }) },
   'GET state': { answer: stateView },
   'GET overview': { answer: overviewView },
+  'GET projects': { answer: () => [] },
+  'GET projects/tools': { answer: () => [] },
+  'GET projects/:id/conversation-preferences': { answer: () => ({ revision: 0, value: { format: 'text', instruction: '' }, actorId: null, updatedAt: '' }) },
+  'PUT projects/:id/conversation-preferences': { body: true, answer: () => new Refusal(409, { error: 'Preferences unavailable' }) },
+  'POST projects/:id/tasks/:taskId/deliveries': { body: true, answer: () => new Refusal(409, { error: 'Review service unavailable' }) },
+  'POST projects/:id/tasks/:taskId/reviews/:reviewId': { body: true, answer: () => new Refusal(409, { error: 'Review service unavailable' }) },
+  'POST projects/:id/messages': { body: true, answer: () => new Refusal(409, { error: 'Project Agent unavailable' }) },
+  'GET projects/:id/agent-runs': { answer: () => [] },
+  'GET projects/:id/checks': { answer: () => [] },
+  'GET projects/:id/history': { query: ['before'], answer: () => ({ entries: [], next: null, notifications: [], synchronization: [], remote: [], checks: [] }) },
+  'POST projects/:id/synchronization/:operationId/retry': { answer: () => ({ status: 'queued' }) },
+  'GET projects/workflow': { answer: () => ({ revision: 0, config: { sources: {}, on: {} }, defaults: { sources: {}, on: {} }, sources: [], events: [] }) },
+  'PUT projects/workflow': { body: true, answer: () => new Refusal(409, { error: 'No fixture workflow' }) },
+  'PUT projects/workflow/sources/:source': { body: true, answer: () => new Refusal(409, { error: 'No fixture workflow' }) },
+  'GET projects/events': { answer: () => [] },
+  'GET projects/execution': { answer: () => ({ state: 'planning' }) },
+  'GET projects/agents': { answer: () => null },
+  'PUT projects/agents': { body: true, answer: () => new Refusal(409, { error: 'Planning agent is unavailable' }) },
+  'GET projects/recent-tickets': { answer: () => [] },
+  'POST projects': { body: true, answer: () => new Refusal(400, { error: 'No fixture project' }) },
+  'GET projects/issue': { query: ['url'], answer: () => new Refusal(404, { error: 'Issue not found' }) },
+  'GET projects/:id': { answer: () => new Refusal(404, { error: 'Project not found' }) },
+  'POST projects/:id/changes': { body: true, answer: () => new Refusal(404, { error: 'Project not found' }) },
+  'POST projects/:id/plan': { body: true, answer: () => new Refusal(404, { error: 'Project not found' }) },
+  'POST projects/:id/tasks/:taskId/run': { body: true, answer: () => new Refusal(404, { error: 'Project not found' }) },
+  'POST projects/:id/tasks/:taskId/follow-up': { body: true, answer: () => new Refusal(404, { error: 'Project not found' }) },
+  'POST projects/:id/tasks/:taskId/stop': { body: true, answer: () => new Refusal(404, { error: 'Project not found' }) },
+  'GET members': { answer: () => [] },
+  'POST members': { body: true, answer: () => new Refusal(400, { error: 'No fixture member' }) },
+  'PUT members/:id': { body: true, answer: () => new Refusal(404, { error: 'Member not found' }) },
+  'DELETE members/:id': { answer: () => new Refusal(404, { error: 'Member not found' }) },
   'GET search': { query: ['q'], answer: async ({ query }) => {
     const q = query.q ?? ''
     await server.searching?.(q)

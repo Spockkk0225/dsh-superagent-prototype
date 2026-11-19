@@ -1,45 +1,54 @@
-# dsh-superagent
+# Super-Org
 
-This repository is the NeuG adaptation of [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype), including the Codex CLI host, DingTalk integration, GitHub App authentication and event handling. The upstream code and MIT license are retained.
+[简体中文](README.zh-CN.md)
 
-**中文安装和使用说明：[README.zh-CN.md](README.zh-CN.md)。**
+Super-Org helps teams turn evolving discussions into project work. Share meeting notes in a project group, confirm the goal and ownership, and let the selected Agent help carry tasks through execution, delivery, and human acceptance. The project board shows what changed, who needs to act, and what actually happened.
 
-For Codex CLI + DingTalk using the original Runtime, Store, Executor and tools, see [docs/009-codex.md](docs/009-codex.md).
+A project can start with a discussion and no repository. Tasks can be handled by people or by the Agent. A GitHub Issue is an optional task reference, and a pull request is evidence for a code delivery. The team can revise its goals, dependencies, and assignments as new information arrives.
 
-> **Research prototype for reference only, not an official DeepSeek product.** This code grew out of our team's day-to-day development work, with much of the engineering done by coding agents. Treat it as research code, not production-ready software. It may still contain bugs, and its coding style and engineering practices may be inconsistent. Review and adapt it before using it in your own environment.
->
-> We have adapted it for publication, so it is not identical to our internal version or the implementation described in *Exploring Super-agent Design: Towards a More Autonomous Agent System*. Some designs discussed in the article are directions for future development and are not implemented in this prototype.
+## How work moves
 
-dsh-superagent is a proactive coding agent for one GitHub repository, packaged as a bundle for [DeepSeek Harness](https://www.deepseek.com/en/harness/). It listens to GitHub and, optionally, Feishu. When someone allowed asks the agent for work, it opens a work item, works on it in its own agent session and directory, and answers in the original conversation, for example with a pull request. A web panel shows what needs a person.
+1. **Agree on actions.** The Agent uses meeting notes to propose concrete tasks, owners, and acceptance criteria. The team confirms the scope and kickoff.
+2. **Work through one project state.** The board and project chat use the same project operations. Work assigned to the Agent gets a ticket that records execution, questions, and delivery.
+3. **React to events.** A ready task, a blocked ticket, a scheduled check, or feedback on a linked PR can wake the Agent with the current context. Project settings and permissions govern the actions it can take.
+4. **Accept the delivery.** A person accepts or returns the current delivery. Acceptance can unblock the next task and close a linked Issue when the task is explicitly responsible for resolving it.
 
-It is also a way of working with an agent: **take as little human attention as possible, and give as much value as possible.** An agent that can act for a whole team can also waste a whole team's attention, so it acts only when asked or when a rule the team wrote allows it, and speaks only when someone must act or can use a result. [docs/000-philosophy.md](docs/000-philosophy.md) explains the principle and what it asks of the operator.
+The system records facts, Agent decisions, tool results, and delivery receipts in SQLite. GitHub, DingTalk, Feishu, and local requests follow a common source contract. GitHub and DingTalk support the project workflows described here. Feishu retains its message and ticket integration. The headless service currently uses Codex for planning and execution.
 
-## Setup
+## Quick start
 
-Setup has many steps, so an agent does it with you. Ask your coding agent:
+Requires Node.js `^22.19.0 || >=24.0.0` and pnpm `11.7.0`.
 
-> Read SETUP.md in this repository and set up dsh-superagent with me.
+```sh
+git clone https://github.com/neug-ai/super-org.git
+cd super-org
+pnpm install --frozen-lockfile
+pnpm build
+pnpm start:codex --projects-only
+```
 
-It asks one short question at a time, shows the full plan once, and then installs and configures everything. [SETUP.md](SETUP.md) is what it follows.
+Open the [project workspace](http://127.0.0.1:3082/orchestrator/projects). This mode supports local project and member management without external accounts. For Agent execution, group chat, or repository integration, follow the deployment guide. [Deploy Super-Org](docs/deployment.zh-CN.md)
+
+## Try the 2048 tutorial
+
+Start with meeting notes from a project chat, run a task, then see how human acceptance unlocks the next one. The walkthrough includes copyable messages, screenshots, and a recording of approval and the resulting changes on the project board. [2048 tutorial · 中文](docs/tutorials/2048.zh-CN.md)
 
 ## Documentation
 
-Read the numbered documents in order; each builds only on the ones before it.
+The [documentation index](docs/README.md) also lists the event reference and verification notes.
 
-- [000 Philosophy](docs/000-philosophy.md)
-- [001 Domain model](docs/001-domain.md)
-- [002 Authorization](docs/002-authorization.md)
-- [003 Execution](docs/003-execution.md)
-- [004 Prompts](docs/004-prompts.md)
-- [005 Panel](docs/005-panel.md)
-- [006 Deployment](docs/006-deployment.md): manual setup, configuration, upgrades and troubleshooting
-- [007 Architecture](docs/007-architecture.md)
-- [008 Cookbook](docs/008-cookbook.md): adding a Source
+| I want to… | Read |
+| --- | --- |
+| Run a project with my team | [Project collaboration](docs/project-guide.zh-CN.md) |
+| Configure the Agent, DingTalk, GitHub, or migrate data | [Deployment and operations](docs/deployment.zh-CN.md) |
+| Understand the project model and event lifecycle | [Architecture](docs/architecture.zh-CN.md) |
+| Configure events or add a source | [Event configuration](docs/events/README.zh-CN.md) · [Source adapters](docs/source-adapters.zh-CN.md) |
+| Verify the workflow on a real project | [2048 acceptance walkthrough](docs/2048-manual-acceptance.zh-CN.md) |
 
-## Development
+Run `pnpm check` for type checking, tests, and a build.
 
-`pnpm check` runs the typecheck, the tests and the build.
+## Credits
 
-## License
+Super-Org builds on DeepSeek’s execution and source infrastructure. The upstream repository maintains its original DSH design and setup documentation. [dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype)
 
-[MIT](LICENSE)
+Distributed under the [MIT License](LICENSE).

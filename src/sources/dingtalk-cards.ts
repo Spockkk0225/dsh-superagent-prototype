@@ -2,7 +2,6 @@
 import { key, type OutboundMessage, type Trigger } from '../core/index.ts'
 import { family } from '../kv.ts'
 import type { SourceContext } from './host.ts'
-import { githubChannel } from './github-trigger.ts'
 
 interface Card {
   triggerId: string; conversationId: string; templateId: string; used: boolean; sent: boolean
@@ -74,14 +73,17 @@ export function githubMentionReplies(context: SourceContext, message: OutboundMe
   // An IM follow-up in this round may contain private context; it does not authorize publishing that context to GitHub.
   if (card?.githubMirrorSuppressed) return []
   const ids = card?.githubMentions?.length ? card.githubMentions : [message.channel.address.triggerId ?? '']
-  const targets = new Map<string, Trigger>()
+  const targets = new Map<string, NonNullable<Trigger['channel']>>()
   for (const id of ids) {
     const trigger = context.triggers.get(id)
     if (trigger?.source !== 'github' || !trigger.human || !trigger.addressed) continue
+    const channel = context.originalChannel?.(trigger) ?? trigger.originalChannel ?? trigger.channel
+    if (channel?.source !== 'github') continue
     const number = Number(trigger.meta.number)
     if (!Number.isInteger(number) || number < 1) continue
     const root = trigger.meta.kind === 'inline' ? String(trigger.meta.inReplyTo ?? trigger.meta.commentId) : ''
-    targets.set(key(String(number), root), trigger)
+    const thread = channel.thread === `github:${number}` ? String(number) : channel.thread
+    targets.set(key(thread, root), channel)
   }
   const prefix = 'This is by an automated agent, not a human.'
   let text = message.text.startsWith(prefix) ? message.text : `${prefix}\n\n${message.text}`
@@ -96,10 +98,11 @@ export function githubMentionReplies(context: SourceContext, message: OutboundMe
     revision = parts.length
     text = `${prefix}\n\n${parts.map(part => part.text).join('\n\n---\n\n')}`
   }
-  return [...targets].map(([target, trigger]) => ({ ...message,
+  return [...targets].map(([target, channel]) => ({ ...message,
     id: key('github-mention-reply', message.id, target),
-    channel: { ...githubChannel(Number(trigger.meta.number), trigger.url), address: {
-      ...githubChannel(Number(trigger.meta.number), trigger.url).address,
+    ...(revision !== undefined ? { correlation: `${key('github-card-comment', cardId!, target)}:${revision}` } : {}),
+    channel: { ...channel, address: {
+      ...channel.address,
       ...revision !== undefined ? { commentKey: key('github-card-comment', cardId!, target), revision: String(revision) } : {},
     } },
     text,

@@ -30,7 +30,9 @@ export class SourceRegistry implements SourceScope {
     }
     for (const [name, entry] of entries) this.health.set(name, entry)
     this.kinds.set(kind.kind, kind as unknown as SourceKind)
-    const unregistered = this.registered(kind as unknown as SourceKind)
+    let unregistered: () => void
+    try { unregistered = this.registered(kind as unknown as SourceKind) }
+    catch (error) { this.kinds.delete(kind.kind); release(); throw error }
     return () => { this.kinds.delete(kind.kind); release(); unregistered() }
   }
   /**
@@ -97,12 +99,19 @@ export class SourceRegistry implements SourceScope {
     if (!kind) return 'waiting'
     return kind.channel ? kind.channel.send({ commands }, message) : 'gone'
   }
+  /** Resolves repository replies through installed adapters rather than provider branches in application tools. */
+  discussion(repository: string, url: string): ChannelRef | undefined {
+    const targets = [...this.kinds.values()].filter(kind => this.instance(kind.kind)?.enabled)
+      .flatMap(kind => { const target = kind.discussion?.(repository, url); return target ? [target] : [] })
+    if (targets.length > 1) throw new Error('Ambiguous repository discussion provider')
+    return targets[0]
+  }
   link(channel: ChannelRef, links: ChannelLinks): ChannelLink {
     const link = this.kinds.get(channel.source)?.channel?.link(channel.address, links)
     return link ?? { url: '', label: { zh: channel.source, en: channel.source } }
   }
   find(query: string): { threads: string[]; terms: string[] } {
-    const found = [...this.kinds.values()].flatMap(kind => kind.find ? [kind.find(query)] : [])
+    const found = [...this.kinds.values()].flatMap(kind => kind.find ? [kind.find(query, this.instance(kind.kind)?.config)] : [])
     return { threads: [...new Set(found.flatMap(item => item.threads))], terms: [...new Set(found.flatMap(item => item.terms))] }
   }
   repliesTo(trigger: Trigger): string | undefined { return this.kinds.get(trigger.source)?.repliesTo?.(trigger) }

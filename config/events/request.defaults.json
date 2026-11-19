@@ -1,0 +1,12 @@
+{
+  "sources": {
+    "request": {
+      "on": {
+        "project.message.received": {
+          "enabled": true,
+          "description": "项目消息唤起 Agent，结合原文、引用、当前任务及成员信息选择项目工具并回告结果。"
+        }
+      }
+    }
+  }
+}

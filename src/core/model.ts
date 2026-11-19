@@ -35,6 +35,8 @@ export interface Trigger {
   at: string
   text: string
   channel?: ChannelRef
+  /** Preserved native reply destination when an application also presents the event in another channel. */
+  originalChannel?: ChannelRef
   url?: string
   /** Source-native details for adapters; the core never interprets them. */
   meta: Record<string, unknown>
@@ -106,7 +108,7 @@ export type AcceptMode = 'off' | 'observe' | 'auto'
 /** Where a Mandate's Trigger was received: its Source, its receiving scope as the Source recorded it, and its admission row. */
 interface Received { source?: string; scope?: Record<string, unknown>; row?: string }
 /**
- * How the gate admitted the Trigger a Mandate came from, which `revalidate` re-checks (see `docs/002`):
+ * How the gate admitted the Trigger a Mandate came from, which `revalidate` re-checks (see the upstream DSH authorization design):
  * - `addressed`: a sender on the Source's list addressed the agent;
  * - `followup`: a message on a Thread that has tickets;
  * - `admission`: the cell of the receiving scope's admission row; `observation` when it made an inferred candidate under
@@ -314,7 +316,11 @@ export interface Ticket {
  * Thread closed; the ticket then ends unless its work has not finished (see `Tickets.unfinished`).
  */
 export interface Follow { thread: string; own: boolean; closed?: { at: string; outcome: 'merged' | 'closed' } }
-export interface Execution { name: string; directory: string; assignment: string }
+export interface Execution {
+  name: string; directory: string; assignment: string
+  /** Project runs pin their repository at dispatch. Null requests an isolated directory without a repository. */
+  projectRepository?: string | null
+}
 
 /** Whether a ticket is open: it has not ended. */
 export const liveTicket = (ticket: Pick<Ticket, 'ended'>): boolean => !ticket.ended
