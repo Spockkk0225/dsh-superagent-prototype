@@ -3,13 +3,14 @@ name: neug-release
 description: Execute the alibaba/neug release runbook end-to-end from a DingTalk group request, with a mandatory human confirmation before creating the public Release.
 ---
 
-Execute the alibaba/neug release runbook end-to-end when a person asks in the DingTalk group to release a version. This is an explicit ticket: carry the request through bump, freeze branch, dry-run, a human confirmation gate, the public Release, watching the release run, and post-publish verification, reporting to the group throughout. The repository's `RELEASE.md` is the authoritative runbook; read it (and `AGENTS.md`) before acting and follow its commands and platform strings. This skill is the agent execution version of it.
+Execute the alibaba/neug release runbook end-to-end when a person asks in the DingTalk group to release a version. This is an explicit ticket: carry the request through bump, freeze branch, dry-run, a human confirmation gate, the public Release, watching the release run, and post-publish verification, reporting to the group throughout. This skill is the self-contained runbook: follow its commands and platform strings directly. Read the repository's `AGENTS.md` for project context when useful.
 
 ## Authority and safety
 
 You may bump the version, push a freeze branch, dispatch the dry-run, create the public Release **only after the group confirms**, and analyze runs. Hard rules:
 
 - Never create or publish a GitHub Release before the human confirmation gate below is answered with an explicit confirm.
+- Never create the public Release unless the Step 3 dry-run succeeded on the exact commit being released. A failed, still-running, or absent dry-run means stop and report — do not publish, even if the group confirms.
 - Create the Release in one step (`gh release create`), never draft-then-publish.
 - Never re-run a workflow/job, re-publish, or re-upload artifacts without a human's explicit confirmation; propose it as an option and wait.
 - The repository is `$DSH_SUPERAGENT_GITHUB_REPOSITORY` (alibaba/neug); pass `--repo "$DSH_SUPERAGENT_GITHUB_REPOSITORY"` to every gh command. gh is signed in as `$DSH_SUPERAGENT_GITHUB_ACCOUNT`, which must have push and release permission. Use `make` targets for version operations; do not hand-edit version strings.
@@ -50,7 +51,7 @@ Dispatch the full-platform dry-run from the freeze branch, then subscribe and en
 gh workflow run package.yml --repo "$DSH_SUPERAGENT_GITHUB_REPOSITORY" --ref release-vX.Y.Z -f platforms=all -f python_versions=all
 ```
 
-Record the run id, follow `github:run:package.yml`, report progress, end the turn. package.yml builds all platforms, runs verify-artifacts smoke, and a `complete` gate asserts everything green. When woken: if the run failed, go to "Failure handling" (do not proceed to release). If it succeeded, continue to step 4 on the same commit.
+Record the run id, follow `github:run:package.yml`, report progress, end the turn. package.yml builds all platforms, runs verify-artifacts smoke, and a `complete` gate asserts everything green. When woken: if the run failed, stop the release here — go to "Failure handling", report the failure, and do not continue to step 4 or 5. Only if it succeeded (the `complete` gate is green) continue to step 4 on the same commit.
 
 ## Step 4 — Release notes and the confirmation gate
 
@@ -62,20 +63,32 @@ The human confirms by replying in the group, @mentioning the bot and including t
 
 ## Step 5 — Create the public Release and wait
 
-After an explicit confirm, create the Release in one step against the frozen commit, using the notes file:
+Proceed only when BOTH gates hold: the Step 3 dry-run succeeded on this exact frozen commit, and the group gave an explicit confirm. If the dry-run failed or has not succeeded, do not create the Release even if the group confirms. With both gates satisfied, create the Release in one step against the frozen commit, using the notes file:
 
 ```
 gh release create vX.Y.Z --repo "$DSH_SUPERAGENT_GITHUB_REPOSITORY" --target <frozen-commit-sha> --notes-file build/release-notes-vX.Y.Z-draft.md
 ```
 
-This fires `release: published`, which runs release.yml (ci-plan → resolve-reuse → package → publish_wheel/npm/extension/java → verify_published → report). Record the release run id (`gh run list --repo "$DSH_SUPERAGENT_GITHUB_REPOSITORY" --workflow release.yml --limit 3`), follow `github:run:release.yml`, report progress, and end the turn. Do not create a draft first.
+This fires `release: published`, which runs release.yml: it builds or reuses the dry-run artifacts, runs each publish job defined there (wheel, npm, extension, Java, and the Lite C API attached to the Release as assets), then verify_published and report. Record the release run id (`gh run list --repo "$DSH_SUPERAGENT_GITHUB_REPOSITORY" --workflow release.yml --limit 3`), follow `github:run:release.yml`, report progress, and end the turn. Do not create a draft first.
 
 ## Step 6 — Release run outcome
 
 When woken by the release run completion:
 
-- **Failed** — go to "Failure handling". Identify the failed job (package / publish_wheel / publish_npm / publish_extension / publish_java / verify_published), read its logs, and report the root cause and recovery options to the group. Any re-run or re-publish needs a fresh human confirmation; never do it unprompted.
-- **Succeeded** — spot-check the registries per RELEASE.md §6: PyPI wheel platform tags and version, npm main package plus the five platform sub-packages, and OSS extension HEAD probes per platform/extension (platform strings must match `getPlatform()`: `osx_arm64`, `win_x86_64`, `win_arm64`). `verify_published` already ran as a release.yml job; confirm its result. Then call `orchestrator_report` with `state: ready` and a concise group result: the released version, the registries verified, any caveat, and the Release/run links.
+- **Failed** — go to "Failure handling". Identify the failed job (package / publish_wheel / publish_npm / publish_extension / publish_java / publish_c_api / verify_published), read its logs, and report the root cause and recovery options to the group. Any re-run or re-publish needs a fresh human confirmation; never do it unprompted.
+- **Succeeded** — spot-check every destination release.yml publishes to (see Post-publish verification), including the Lite C API assets attached to the Release. `verify_published` already ran as a release.yml job; confirm its result. Then call `orchestrator_report` with `state: ready` and a concise group result: the released version, the registries and assets verified, any caveat, and the Release/run links.
+
+## Post-publish verification
+
+A green release run does not prove the artifacts are live. The authoritative artifact set — the platforms, npm sub-packages, extensions and C API platforms — is defined by `release.yml` and the `ci-plan.yml` it consumes; read those from the repository for the current matrix rather than relying on a fixed list here. Spot-check each destination release.yml publishes to:
+
+- **PyPI** (`publish_wheel`): the `neug` wheels cover the planned platforms at the released version (`https://pypi.org/pypi/neug/<ver>/json`).
+- **npm** (`publish_npm`): the `@neug-ai/neug` main package and its platform sub-packages are published at the same version (`npm view`).
+- **OSS** (`publish_extension`): each planned platform/extension library is reachable at the OSS path release.yml uploads to (HEAD probe; 200 live, 404 missing).
+- **Maven Central** (`publish_java`): the Java driver artifacts are present at the released version.
+- **GitHub Release assets** (`publish_c_api`): the Lite C API archives `neug-c-api-<ver>-lite-<platform>.tar.gz` are attached for every C API platform in the plan — check with `gh release view vX.Y.Z --repo "$DSH_SUPERAGENT_GITHUB_REPOSITORY" --json assets`.
+
+`verify_published` already ran as a release.yml job covering the real published packages; confirm its result. Use the platform strings exactly as the plan and release.yml define them (a mismatch makes OSS probes 404). The version must agree across PyPI, npm, the OSS paths, Maven, the C API assets and the compiled `NEUG_VERSION`.
 
 ## Failure handling (any run)
 
