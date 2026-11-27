@@ -7,7 +7,7 @@ Diagnose alibaba/neug CI failures read-only and report the root cause, evidence 
 
 ## Authority (read-only)
 
-This ticket authorizes diagnosis and a group report only. Do not edit code, do not commit, push or open a PR, do not re-run or cancel any workflow or job, do not create or edit a Release, and do not change repository settings or secrets. Report `pr_number: null`. If the evidence shows a fix is needed, describe it as a suggestion for a human; never apply it here. Read repository `AGENTS.md` and `RELEASE.md` for context when useful.
+This ticket authorizes diagnosis and a group report only. Do not edit code, do not commit, push or open a PR, do not re-run or cancel any workflow or job, do not create or edit a Release, and do not change repository settings or secrets. Report `pr_number: null`. If the evidence shows a fix is needed, describe it as a suggestion for a human; never apply it here. Read repository `AGENTS.md` for context when useful.
 
 ## CI map
 

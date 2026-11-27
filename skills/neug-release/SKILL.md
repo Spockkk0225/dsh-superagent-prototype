@@ -3,13 +3,14 @@ name: neug-release
 description: Execute the alibaba/neug release runbook end-to-end from a DingTalk group request, with a mandatory human confirmation before creating the public Release.
 ---
 
-Execute the alibaba/neug release runbook end-to-end when a person asks in the DingTalk group to release a version. This is an explicit ticket: carry the request through bump, freeze branch, dry-run, a human confirmation gate, the public Release, watching the release run, and post-publish verification, reporting to the group throughout. The repository's `RELEASE.md` is the authoritative runbook; read it (and `AGENTS.md`) before acting and follow its commands and platform strings. This skill is the agent execution version of it.
+Execute the alibaba/neug release runbook end-to-end when a person asks in the DingTalk group to release a version. This is an explicit ticket: carry the request through bump, freeze branch, dry-run, a human confirmation gate, the public Release, watching the release run, and post-publish verification, reporting to the group throughout. This skill is the self-contained runbook: follow its commands and platform strings directly. Read the repository's `AGENTS.md` for project context when useful.
 
 ## Authority and safety
 
 You may bump the version, push a freeze branch, dispatch the dry-run, create the public Release **only after the group confirms**, and analyze runs. Hard rules:
 
 - Never create or publish a GitHub Release before the human confirmation gate below is answered with an explicit confirm.
+- Never create the public Release unless the Step 3 dry-run succeeded on the exact commit being released. A failed, still-running, or absent dry-run means stop and report — do not publish, even if the group confirms.
 - Create the Release in one step (`gh release create`), never draft-then-publish.
 - Never re-run a workflow/job, re-publish, or re-upload artifacts without a human's explicit confirmation; propose it as an option and wait.
 - The repository is `$DSH_SUPERAGENT_GITHUB_REPOSITORY` (alibaba/neug); pass `--repo "$DSH_SUPERAGENT_GITHUB_REPOSITORY"` to every gh command. gh is signed in as `$DSH_SUPERAGENT_GITHUB_ACCOUNT`, which must have push and release permission. Use `make` targets for version operations; do not hand-edit version strings.
@@ -50,7 +51,7 @@ Dispatch the full-platform dry-run from the freeze branch, then subscribe and en
 gh workflow run package.yml --repo "$DSH_SUPERAGENT_GITHUB_REPOSITORY" --ref release-vX.Y.Z -f platforms=all -f python_versions=all
 ```
 
-Record the run id, follow `github:run:package.yml`, report progress, end the turn. package.yml builds all platforms, runs verify-artifacts smoke, and a `complete` gate asserts everything green. When woken: if the run failed, go to "Failure handling" (do not proceed to release). If it succeeded, continue to step 4 on the same commit.
+Record the run id, follow `github:run:package.yml`, report progress, end the turn. package.yml builds all platforms, runs verify-artifacts smoke, and a `complete` gate asserts everything green. When woken: if the run failed, stop the release here — go to "Failure handling", report the failure, and do not continue to step 4 or 5. Only if it succeeded (the `complete` gate is green) continue to step 4 on the same commit.
 
 ## Step 4 — Release notes and the confirmation gate
 
@@ -62,7 +63,7 @@ The human confirms by replying in the group, @mentioning the bot and including t
 
 ## Step 5 — Create the public Release and wait
 
-After an explicit confirm, create the Release in one step against the frozen commit, using the notes file:
+Proceed only when BOTH gates hold: the Step 3 dry-run succeeded on this exact frozen commit, and the group gave an explicit confirm. If the dry-run failed or has not succeeded, do not create the Release even if the group confirms. With both gates satisfied, create the Release in one step against the frozen commit, using the notes file:
 
 ```
 gh release create vX.Y.Z --repo "$DSH_SUPERAGENT_GITHUB_REPOSITORY" --target <frozen-commit-sha> --notes-file build/release-notes-vX.Y.Z-draft.md
@@ -75,7 +76,28 @@ This fires `release: published`, which runs release.yml (ci-plan → resolve-reu
 When woken by the release run completion:
 
 - **Failed** — go to "Failure handling". Identify the failed job (package / publish_wheel / publish_npm / publish_extension / publish_java / verify_published), read its logs, and report the root cause and recovery options to the group. Any re-run or re-publish needs a fresh human confirmation; never do it unprompted.
-- **Succeeded** — spot-check the registries per RELEASE.md §6: PyPI wheel platform tags and version, npm main package plus the five platform sub-packages, and OSS extension HEAD probes per platform/extension (platform strings must match `getPlatform()`: `osx_arm64`, `win_x86_64`, `win_arm64`). `verify_published` already ran as a release.yml job; confirm its result. Then call `orchestrator_report` with `state: ready` and a concise group result: the released version, the registries verified, any caveat, and the Release/run links.
+- **Succeeded** — spot-check the registries (see Post-publish verification): PyPI wheel platform tags and version, npm main package plus the five platform sub-packages, and OSS extension HEAD probes per platform/extension (platform strings must match `getPlatform()`: `osx_arm64`, `win_x86_64`, `win_arm64`). `verify_published` already ran as a release.yml job; confirm its result. Then call `orchestrator_report` with `state: ready` and a concise group result: the released version, the registries verified, any caveat, and the Release/run links.
+
+## Post-publish verification
+
+A green release run does not prove the artifacts are live; spot-check each registry. The five target platforms (macOS is arm64 only, never x86_64) use these `getPlatform()` / OSS directory strings: `linux_x86_64`, `linux_arm64`, `osx_arm64`, `win_x86_64`, `win_arm64`. The npm sub-packages use the hyphenated forms `linux-x86_64`, `linux-arm64`, `osx-arm64`, `windows-x86_64`, `windows-arm64` under the `@neug-ai` scope. The six extensions are `parquet`, `httpfs`, `gds`, `pattern_matching`, `vector_search`, `fts`.
+
+```
+# PyPI: wheel platform tags complete and version correct
+curl -s https://pypi.org/pypi/neug/<ver>/json | python3 -c "import sys,json;[print(u['filename']) for u in json.load(sys.stdin)['urls']]"
+# npm: main package + five platform sub-packages at the same version
+npm view @neug-ai/neug optionalDependencies --json
+for p in linux-x86_64 linux-arm64 osx-arm64 windows-x86_64 windows-arm64; do npm view @neug-ai/$p version; done
+# OSS: HEAD-probe each platform/extension (200 live, 404 missing)
+BASE=https://graphscope.oss-cn-beijing.aliyuncs.com/neug/extensions
+for plat in linux_x86_64 linux_arm64 osx_arm64 win_x86_64 win_arm64; do
+  for ext in parquet httpfs gds pattern_matching vector_search fts; do
+    curl -s -o /dev/null -w "%{http_code} $plat/$ext\n" "$BASE/v<ver>/$plat/$ext/lib$ext.neug_extension"
+  done
+done
+```
+
+Platform strings must match `getPlatform()` exactly (`osx_arm64`, not `macos_arm64`; `win_x86_64`/`win_arm64`), or OSS probes 404. PyPI/neug, the npm main and sub-packages, the OSS `v<ver>` path and the compiled `NEUG_VERSION` must all agree.
 
 ## Failure handling (any run)
 
